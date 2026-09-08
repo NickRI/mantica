@@ -1,5 +1,9 @@
 <div align="center">
 
+  <p>
+    <img src="logo.svg" width="220" alt="Mantica">
+  </p>
+
   <h1>Mantica</h1>
 
   <p>
