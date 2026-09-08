@@ -5,6 +5,7 @@
 .idea
 tilesets/*
 !tilesets/.gitkeep
+.downloads/
 *.pmtiles
 *.mbtiles
 .downloads.json

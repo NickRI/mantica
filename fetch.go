@@ -384,7 +384,7 @@ func (a *App) hydraOptions(onProgress hydra.ProgressFunc) hydra.Options {
 }
 
 func (a *App) hydraWorkDir(job *Download) string {
-	return filepath.Join(os.TempDir(), "mantica-hydra", job.ID)
+	return filepath.Join(a.dir, ".downloads", job.ID)
 }
 
 func (a *App) clearHydraWorkDir(job *Download) {

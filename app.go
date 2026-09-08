@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -200,6 +201,7 @@ func (a *App) scan() error {
 		}
 		return err
 	}
+	filenames = filterRuntimePaths(a.dir, filenames)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -269,6 +271,7 @@ func (a *App) listMaps() ([]MapInfo, error) {
 	if err != nil {
 		return nil, err
 	}
+	mbFiles = filterRuntimePaths(a.dir, mbFiles)
 	pmFiles, err := findPMTiles(a.dir)
 	if err != nil {
 		return nil, err
@@ -387,4 +390,32 @@ func readMapInfo(filename, baseDir string) (MapInfo, error) {
 func shortID(s string) string {
 	sum := sha1.Sum([]byte(s))
 	return hex.EncodeToString(sum[:6])
+}
+
+// filterRuntimePaths drops tiles under hidden runtime dirs (e.g. .downloads/).
+func filterRuntimePaths(base string, paths []string) []string {
+	out := paths[:0:0]
+	for _, p := range paths {
+		if isRuntimePath(base, p) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+func isRuntimePath(base, path string) bool {
+	rel, err := filepath.Rel(base, path)
+	if err != nil {
+		return false
+	}
+	for _, part := range strings.Split(rel, string(os.PathSeparator)) {
+		if part == "." || part == ".." {
+			continue
+		}
+		if strings.HasPrefix(part, ".") {
+			return true
+		}
+	}
+	return false
 }
