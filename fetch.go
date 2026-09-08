@@ -63,6 +63,11 @@ type CatalogSection struct {
 
 var catalogCategoryOrder = []string{"World", "Europe", "USA", "Asia", "Africa"}
 
+const (
+	downloadRetries   = 3
+	downloadRetryWait = 10 * time.Second
+)
+
 func loadCatalog() []CatalogSection {
 	data, err := catalogFS.ReadFile("catalog.json")
 	if err != nil {
@@ -234,7 +239,7 @@ func (a *App) resumeJobs() {
 	var resume []*Download
 	for _, job := range a.jobs {
 		switch job.Status {
-		case "running", "paused":
+		case "running", "paused", "error":
 			resume = append(resume, job)
 		}
 	}
@@ -272,12 +277,9 @@ func (a *App) startDownload(rawURL, name, checksum string, replace bool) (*Downl
 	destName := finalTilesetName(remote)
 	dest := filepath.Join(a.dir, destName)
 
-	a.mu.Lock()
-	if existing := a.activeJobByNameLocked(destName); existing != nil {
-		a.mu.Unlock()
-		return existing, nil
+	if job := a.claimDownload(destName, replace); job != nil {
+		return job, nil
 	}
-	a.mu.Unlock()
 
 	if _, err := os.Stat(dest); err == nil {
 		if !replace {
@@ -290,13 +292,15 @@ func (a *App) startDownload(rawURL, name, checksum string, replace bool) (*Downl
 		return nil, err
 	}
 
-	a.mu.Lock()
-	if existing := a.activeJobByNameLocked(destName); existing != nil {
-		a.mu.Unlock()
-		return existing, nil
+	if job := a.claimDownload(destName, replace); job != nil {
+		return job, nil
 	}
+
+	a.mu.Lock()
+	var stale []*Download
 	for id, job := range a.jobs {
 		if job.Name == destName {
+			stale = append(stale, job)
 			delete(a.jobs, id)
 		}
 	}
@@ -312,14 +316,43 @@ func (a *App) startDownload(rawURL, name, checksum string, replace bool) (*Downl
 	}
 	a.jobs[id] = job
 	a.mu.Unlock()
+	for _, old := range stale {
+		a.clearHydraWorkDir(old)
+	}
 	a.saveJobs()
 	go a.runDownload(job)
 	return job, nil
 }
 
+func (a *App) claimDownload(destName string, replace bool) *Download {
+	a.mu.Lock()
+	if existing := a.activeJobByNameLocked(destName); existing != nil {
+		a.mu.Unlock()
+		return existing
+	}
+	if !replace {
+		if existing := a.resumableJobByNameLocked(destName); existing != nil {
+			a.mu.Unlock()
+			go a.runDownload(existing)
+			return existing
+		}
+	}
+	a.mu.Unlock()
+	return nil
+}
+
 func (a *App) activeJobByNameLocked(name string) *Download {
 	for _, job := range a.jobs {
 		if job.Name == name && (job.Status == "running" || job.Status == "paused") {
+			return job
+		}
+	}
+	return nil
+}
+
+func (a *App) resumableJobByNameLocked(name string) *Download {
+	for _, job := range a.jobs {
+		if job.Name == name && job.Status == "error" {
 			return job
 		}
 	}
@@ -417,11 +450,14 @@ func relocateFile(src, dest string) error {
 }
 
 func (a *App) runDownload(job *Download) {
-	a.downloadWG.Add(1)
-	defer a.downloadWG.Done()
-
 	ctx, cancel := context.WithCancel(context.Background())
 	a.mu.Lock()
+	if _, running := a.cancels[job.ID]; running {
+		a.mu.Unlock()
+		cancel()
+		return
+	}
+	a.downloadWG.Add(1)
 	a.cancels[job.ID] = cancel
 	job.Status = "running"
 	job.Error = ""
@@ -435,6 +471,7 @@ func (a *App) runDownload(job *Download) {
 		a.mu.Unlock()
 		cancel()
 		a.saveJobs()
+		a.downloadWG.Done()
 	}()
 
 	workDir := a.hydraWorkDir(job)
@@ -449,6 +486,7 @@ func (a *App) runDownload(job *Download) {
 		job.Total = p.Total
 		job.Written = p.Completed
 		job.Speed = p.Speed
+		job.Error = ""
 		if time.Since(lastSave) > 2*time.Second {
 			lastSave = time.Now()
 			a.saveJobs()
@@ -471,27 +509,35 @@ func (a *App) runDownload(job *Download) {
 		req.Checksum = cs
 	}
 
-	// Stale lock from a killed process blocks resume; we own this job.
-	_ = os.Remove(filepath.Join(workDir, job.RemoteName) + ".hydra.lock")
-
-	res, err := hydra.Download(ctx, req, opts)
-	if err != nil {
-		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
-			a.mu.Lock()
-			stopping := a.shuttingDown
-			a.mu.Unlock()
-			if stopping {
-				job.Status = "paused"
-			} else {
-				job.Status = "cancelled"
-				a.clearHydraWorkDir(job)
+	var res hydra.Result
+	for attempt := 0; attempt <= downloadRetries; attempt++ {
+		if attempt > 0 {
+			wait := downloadRetryWait << (attempt - 1)
+			select {
+			case <-ctx.Done():
+				a.finishCanceled(job)
+				return
+			case <-time.After(wait):
 			}
 			job.Error = ""
+		}
+		// Stale lock from a killed process blocks resume; we own this job.
+		_ = os.Remove(filepath.Join(workDir, job.RemoteName) + ".hydra.lock")
+		var err error
+		res, err = hydra.Download(ctx, req, opts)
+		if err == nil {
+			break
+		}
+		if errors.Is(err, context.Canceled) || ctx.Err() != nil {
+			a.finishCanceled(job)
 			return
 		}
-		job.Status = "error"
 		job.Error = err.Error()
-		return
+		if attempt == downloadRetries {
+			job.Status = "error"
+			return
+		}
+		a.saveJobs()
 	}
 
 	job.Total = res.Size
@@ -676,6 +722,19 @@ func writeFile(dest string, r io.Reader) error {
 		return err
 	}
 	return os.Rename(tmp, dest)
+}
+
+func (a *App) finishCanceled(job *Download) {
+	a.mu.Lock()
+	stopping := a.shuttingDown
+	a.mu.Unlock()
+	if stopping {
+		job.Status = "paused"
+	} else {
+		job.Status = "cancelled"
+		a.clearHydraWorkDir(job)
+	}
+	job.Error = ""
 }
 
 func (a *App) job(id string) *Download {
