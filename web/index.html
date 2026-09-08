@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mantica</title>
+    <link rel="stylesheet" href="/vendor/maplibre-gl/maplibre-gl.css" />
+    <link rel="stylesheet" href="/app.css" />
+  </head>
+  <body>
+    <div id="toasts" class="toasts" aria-live="polite" aria-relevant="additions"></div>
+
+    <div id="map"></div>
+
+    <div class="hud">
+      <button id="menu-toggle" class="icon-btn" type="button" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+      <div class="hud-title">
+        <strong id="current-name">Mantica</strong>
+        <span id="current-meta"></span>
+      </div>
+      <div class="geo-search">
+        <input id="geo-q" type="search" autocomplete="off" data-i18n-placeholder="geo_placeholder" placeholder="Адрес, место…" />
+        <div id="geo-results" class="geo-results" hidden></div>
+      </div>
+      <div class="map-tools" role="toolbar" aria-label="Map tools">
+        <button id="tool-theme" class="tool-btn" type="button" data-i18n-title="tool_theme" title="Тема">
+          <svg class="icon-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 3.2a9 9 0 1 0 5.3 15.1A8 8 0 0 1 15.5 3.2Z" fill="currentColor"/></svg>
+          <svg class="icon-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4" fill="currentColor"/><path d="M12 2v2.5M12 19.5V22M4.2 4.2l1.8 1.8M18 18l1.8 1.8M2 12h2.5M19.5 12H22M4.2 19.8 6 18M18 6l1.8-1.8" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" fill="none"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <div id="scrim" class="scrim" hidden></div>
+
+    <aside id="drawer" class="drawer">
+      <header class="drawer-head">
+        <p class="eyebrow" data-i18n="brand">Mantica</p>
+        <h1 data-i18n="title">Mantica</h1>
+        <nav class="tabs" role="tablist">
+          <button class="tab active" data-tab="maps" type="button" data-i18n="tab_maps">Карты</button>
+          <button class="tab" data-tab="download" type="button" data-i18n="tab_download">Загрузка</button>
+          <button class="tab" data-tab="catalog" type="button" data-i18n="tab_catalog">Каталог</button>
+          <button class="tab" data-tab="settings" type="button" data-i18n="tab_settings">Настройки</button>
+        </nav>
+      </header>
+
+      <section id="panel-maps" class="panel active">
+        <label class="search">
+          <input id="search" type="search" autocomplete="off" data-i18n-placeholder="search_placeholder" placeholder="Поиск по имени, формату, id…" />
+        </label>
+        <div id="map-list" class="list"></div>
+        <div id="maps-usage" class="maps-breakdown" hidden>
+          <p id="maps-usage-title" class="maps-breakdown-title"></p>
+          <div id="maps-usage-bar" class="storage-segments" role="img"></div>
+          <div id="maps-usage-legend" class="storage-legend"></div>
+        </div>
+      </section>
+
+      <section id="panel-download" class="panel">
+        <form id="url-form" class="stack">
+          <label>
+            <span data-i18n="url_label">URL файла .mbtiles / .pmtiles</span>
+            <input id="url-input" type="url" required placeholder="https://example.com/region.pmtiles" />
+          </label>
+          <label>
+            <span data-i18n="name_label">Имя файла (необязательно)</span>
+            <input id="name-input" type="text" placeholder="region.mbtiles" />
+          </label>
+          <label>
+            <span data-i18n="checksum_label">Checksum (необязательно)</span>
+            <input id="checksum-input" type="text" placeholder="sha256:…" autocomplete="off" />
+          </label>
+          <button class="btn" type="submit" data-i18n="download_btn">Скачать</button>
+        </form>
+
+        <div class="card-row jobs-head">
+          <h2 data-i18n="jobs">Задачи</h2>
+          <button id="clear-completed" class="btn secondary" type="button" data-i18n="clear_completed">Очистить завершённые</button>
+        </div>
+        <div id="job-list" class="list"></div>
+
+        <div id="disk-usage" class="storage-meter">
+          <div class="storage-track"><i id="disk-usage-fill"></i></div>
+          <p id="disk-usage-text" class="meta"></p>
+        </div>
+      </section>
+
+      <section id="panel-catalog" class="panel">
+        <label class="search">
+          <input id="catalog-search" type="search" autocomplete="off" data-i18n-placeholder="catalog_search_placeholder" placeholder="Поиск по имени…" />
+        </label>
+        <div id="catalog-list" class="list"></div>
+      </section>
+
+      <section id="panel-settings" class="panel">
+        <label class="stack">
+          <span data-i18n="language">Язык интерфейса</span>
+          <select id="lang-select">
+            <option value="ru">Русский</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+        <form id="download-settings" class="stack">
+          <label>
+            <span data-i18n="rate_limit">Лимит скорости (байт/с, 0 = без лимита)</span>
+            <input id="rate-limit" type="number" min="0" step="1024" value="0" />
+          </label>
+          <button class="btn secondary" type="submit" data-i18n="save_settings">Сохранить</button>
+        </form>
+        <p class="hint" data-i18n="settings_hint">Язык и лимиты сохраняются на сервере. Карты лежат в каталоге tilesets.</p>
+
+        <div class="geocoder-settings">
+          <span data-i18n="geocoders_label">Геокодеры</span>
+          <p class="hint" data-i18n="geocoders_hint">Порядок сверху вниз — приоритет. При ошибке пробуется следующий. Ключи API — в sops (maps/geocoder-keys).</p>
+          <div id="geocoder-list" class="geocoder-list"></div>
+        </div>
+
+        <div class="theme-settings">
+          <span data-i18n="palette_label">Цветовая тема</span>
+          <div id="palette-list" class="palette-grid"></div>
+          <span data-i18n="appearance_label">Оформление</span>
+          <div class="mode-toggle">
+            <button id="mode-dark" class="mode-btn" type="button" data-mode="dark" data-i18n="mode_dark">Тёмная</button>
+            <button id="mode-light" class="mode-btn" type="button" data-mode="light" data-i18n="mode_light">Светлая</button>
+          </div>
+          <p class="hint" data-i18n="theme_hint">Тема хранится только в браузере.</p>
+        </div>
+      </section>
+    </aside>
+
+    <div id="empty" class="empty">
+      <svg viewBox="0 0 64 64" aria-hidden="true">
+        <circle cx="32" cy="32" r="22" fill="none" stroke="currentColor" stroke-width="1.4" />
+        <path d="M32 10 L34.5 29.5 L54 32 L34.5 34.5 L32 54 L29.5 34.5 L10 32 L29.5 29.5 Z" fill="currentColor" />
+      </svg>
+      <p data-i18n="empty">Выберите карту в меню слева</p>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

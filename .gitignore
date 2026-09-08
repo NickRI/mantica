@@ -1,0 +1,12 @@
+/vendor/
+/dist/
+/result
+/result-*
+.idea
+tilesets/*
+!tilesets/.gitkeep
+*.pmtiles
+*.mbtiles
+.downloads.json
+.geocode-cache.gz
+.settings.json

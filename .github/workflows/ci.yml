@@ -1,0 +1,26 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Go test / vet
+        run: |
+          go vet ./...
+          go test ./...
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Nix build
+        run: nix build .#default --print-build-logs
