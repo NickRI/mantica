@@ -22,6 +22,7 @@
 
   <p>
     <a href="https://github.com/NickRI/mantica"><img src="https://img.shields.io/badge/GitHub-NickRI%2Fmantica-black" alt="GitHub"></a>
+    <a href="https://github.com/NickRI/mantica/releases/latest"><img src="https://img.shields.io/github/v/release/NickRI/mantica" alt="Latest release"></a>
   </p>
 
 </div>
