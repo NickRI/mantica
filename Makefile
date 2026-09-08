@@ -5,7 +5,7 @@ DIST ?= dist
 
 build:
 	mkdir -p $(DIST)
-	CGO_ENABLED=0 go build -trimpath -ldflags "-s -w" -o $(DIST)/mantica .
+	CGO_ENABLED=1 go build -trimpath -ldflags "-s -w" -o $(DIST)/mantica .
 
 release-artifacts: build
 	cd $(DIST) && tar -czf mantica-linux-amd64.tar.gz mantica
