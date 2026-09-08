@@ -9,6 +9,8 @@
   <h3>
     <a href="#nixos-flake">NixOS</a>
     <span> | </span>
+    <a href="#downloads">Downloads</a>
+    <span> | </span>
     <a href="#run-locally">Run locally</a>
     <span> | </span>
     <a href="#options-nixos">Options</a>
@@ -53,6 +55,20 @@ Default listen: `127.0.0.1:8091` (NixOS module). CLI default is `:8080`.
 }
 ```
 
+## Downloads
+
+Latest binary: **[GitHub Releases](https://github.com/NickRI/mantica/releases/latest)**
+
+| Asset | Download |
+|-------|----------|
+| Linux amd64 binary | [`mantica-linux-amd64.tar.gz`](https://github.com/NickRI/mantica/releases/latest/download/mantica-linux-amd64.tar.gz) |
+
+```sh
+curl -fsSL -o mantica-linux-amd64.tar.gz \
+  https://github.com/NickRI/mantica/releases/latest/download/mantica-linux-amd64.tar.gz
+tar -xzf mantica-linux-amd64.tar.gz   # → ./mantica
+```
+
 ## Run locally
 
 ```sh
@@ -85,6 +101,6 @@ Put tile archives in `-dir` (default `./tilesets`). Runtime state (`.settings.js
 
 ```sh
 go build -o mantica .
+make release-artifacts
 nix build
-nix flake check
 ```
