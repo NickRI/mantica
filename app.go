@@ -27,14 +27,17 @@ type App struct {
 	jobs         map[string]*Download
 	cancels      map[string]context.CancelFunc
 	downloadWG   sync.WaitGroup
+	hashes       hashStore
+	verifyCancel map[string]context.CancelFunc
+	verifyWG     sync.WaitGroup
 	shuttingDown bool
 	limiter      *rate.Limiter
 	settings     Settings
 	catalog      []CatalogSection
 	geocoderKeys map[string]string
-	geo            GeoSearch
-	geoStatus      map[string]geoStatus
-	geoCache       *geoCacheStore
+	geo          GeoSearch
+	geoStatus    map[string]geoStatus
+	geoCache     *geoCacheStore
 }
 
 type Settings struct {
@@ -67,6 +70,13 @@ type MapInfo struct {
 	TileJSON     string          `json:"tilejson"`
 	VectorLayers json.RawMessage `json:"vector_layers,omitempty"`
 	Error        string          `json:"error,omitempty"`
+	Checksum     string          `json:"checksum,omitempty"`
+	HashStatus   string          `json:"hash_status,omitempty"`
+	HashActual   string          `json:"hash_actual,omitempty"`
+	HashError    string          `json:"hash_error,omitempty"`
+	HashWritten  int64           `json:"hash_written,omitempty"`
+	HashTotal    int64           `json:"hash_total,omitempty"`
+	HashChecked  time.Time       `json:"hash_checked,omitempty"`
 }
 
 func newApp(dir, geocoderKeysPath string, geocodeCacheBytes int64) (*App, error) {
@@ -95,11 +105,12 @@ func newApp(dir, geocoderKeysPath string, geocodeCacheBytes int64) (*App, error)
 	}
 
 	a := &App{
-		dir:     dir,
-		svc:     svc,
-		pmtiles: pmt,
-		jobs:    make(map[string]*Download),
-		cancels: make(map[string]context.CancelFunc),
+		dir:          dir,
+		svc:          svc,
+		pmtiles:      pmt,
+		jobs:         make(map[string]*Download),
+		cancels:      make(map[string]context.CancelFunc),
+		verifyCancel: make(map[string]context.CancelFunc),
 		settings: Settings{
 			Language:  "ru",
 			Servers:   []RemoteServer{},
@@ -114,6 +125,7 @@ func newApp(dir, geocoderKeysPath string, geocodeCacheBytes int64) (*App, error)
 	a.setRateLimit(a.settings.RateLimitBps)
 	a.rebuildGeo()
 	a.loadJobs()
+	a.loadHashes()
 	if err := a.scan(); err != nil {
 		return nil, err
 	}
@@ -253,6 +265,7 @@ func (a *App) removeMap(id, kind string) error {
 		}
 	}
 	path := tilesetPath(a.dir, id, kind)
+	a.forgetHash(filepath.Base(path))
 	if kind == "pmtiles" {
 		return os.Remove(path)
 	}
@@ -298,6 +311,9 @@ func (a *App) listMaps() ([]MapInfo, error) {
 			continue
 		}
 		out = append(out, info)
+	}
+	for i := range out {
+		a.decorateHash(&out[i])
 	}
 	return out, nil
 }

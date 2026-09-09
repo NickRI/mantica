@@ -21,6 +21,9 @@ import (
 //go:embed web/index.html web/app.css web/app.js web/vendor/maplibre-gl web/vendor/protomaps-basemaps web/vendor/protomaps-basemaps-assets
 var webFS embed.FS
 
+//go:embed logo.svg
+var logoSVG []byte
+
 func run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheBytes int64) error {
 	app, err := newApp(dir, geocoderKeysPath, geocodeCacheBytes)
 	if err != nil {
@@ -33,6 +36,7 @@ func run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 		w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /api/maps", app.handleListMaps)
+	mux.HandleFunc("POST /api/maps/{id}/verify", app.handleVerifyMap)
 	mux.HandleFunc("DELETE /api/maps/{id...}", app.handleDeleteMap)
 	mux.HandleFunc("GET /api/catalog", app.handleCatalog)
 	mux.HandleFunc("POST /api/catalog/{id}/download", app.handleCatalogDownload)
@@ -41,6 +45,7 @@ func run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 	mux.HandleFunc("DELETE /api/downloads/{id}", app.handleDeleteDownload)
 	mux.HandleFunc("POST /api/downloads/{id}/cancel", app.handleCancelDownload)
 	mux.HandleFunc("POST /api/downloads/clear-completed", app.handleClearCompletedDownloads)
+	mux.HandleFunc("POST /api/downloads/clear-orphans", app.handleClearOrphanDownloads)
 	mux.HandleFunc("POST /api/downloads", app.handleStartDownload)
 	mux.HandleFunc("GET /api/storage", app.handleStorage)
 	mux.HandleFunc("GET /api/settings", app.handleGetSettings)
@@ -63,6 +68,10 @@ func run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 	mux.Handle("GET /app.js", fileServer)
 	mux.Handle("GET /app.css", fileServer)
 	mux.Handle("GET /vendor/", fileServer)
+	mux.HandleFunc("GET /favicon.svg", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/svg+xml")
+		w.Write(logoSVG)
+	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, static, "index.html")
 	})
@@ -217,6 +226,29 @@ func (a *App) handleDeleteDownload(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
 	a.cancelJob(r.PathValue("id"))
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (a *App) handleVerifyMap(w http.ResponseWriter, r *http.Request) {
+	kind := r.URL.Query().Get("kind")
+	rec, err := a.startVerify(r.PathValue("id"), kind)
+	if err != nil {
+		if errors.Is(err, errNoChecksum) {
+			writeError(w, http.StatusBadRequest, err)
+			return
+		}
+		if errors.Is(err, errVerifyBusy) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, rec)
+}
+
+func (a *App) handleClearOrphanDownloads(w http.ResponseWriter, r *http.Request) {
+	n := a.clearOrphanDownloads()
+	writeJSON(w, http.StatusOK, map[string]int{"removed": n})
 }
 
 func (a *App) handleStartDownload(w http.ResponseWriter, r *http.Request) {

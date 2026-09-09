@@ -244,7 +244,11 @@ func (a *App) resumeJobs() {
 		}
 	}
 	a.mu.Unlock()
+	if len(resume) > 0 {
+		slog.Info("resuming downloads", "count", len(resume))
+	}
 	for _, job := range resume {
+		slog.Info("download resume", "id", job.ID, "name", job.Name, "status", job.Status, "written", job.Written, "total", job.Total)
 		go a.runDownload(job)
 	}
 }
@@ -260,6 +264,7 @@ func (a *App) pauseAllDownloads() {
 	for _, cancel := range cancels {
 		cancel()
 	}
+	a.cancelVerifies()
 	done := make(chan struct{})
 	go func() {
 		a.downloadWG.Wait()
@@ -320,6 +325,7 @@ func (a *App) startDownload(rawURL, name, checksum string, replace bool) (*Downl
 		a.clearHydraWorkDir(old)
 	}
 	a.saveJobs()
+	a.rememberChecksum(destName, a.catalogChecksum(destName, checksum))
 	go a.runDownload(job)
 	return job, nil
 }
@@ -421,12 +427,17 @@ func (a *App) hydraWorkDir(job *Download) string {
 }
 
 func (a *App) clearHydraWorkDir(job *Download) {
-	_ = os.RemoveAll(a.hydraWorkDir(job))
+	dir := a.hydraWorkDir(job)
+	slog.Info("download workdir remove", "id", job.ID, "dir", dir)
+	_ = os.RemoveAll(dir)
 }
 
 func relocateFile(src, dest string) error {
 	if err := os.Rename(src, dest); err == nil {
+		slog.Info("tileset renamed", "src", src, "dest", dest)
 		return nil
+	} else {
+		slog.Warn("tileset rename failed, copying", "src", src, "dest", dest, "err", err)
 	}
 	in, err := os.Open(src)
 	if err != nil {
@@ -437,7 +448,8 @@ func relocateFile(src, dest string) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	n, err := io.Copy(out, in)
+	if err != nil {
 		out.Close()
 		os.Remove(dest)
 		return err
@@ -446,7 +458,11 @@ func relocateFile(src, dest string) error {
 		os.Remove(dest)
 		return err
 	}
-	return os.Remove(src)
+	if err := os.Remove(src); err != nil {
+		return err
+	}
+	slog.Info("tileset copied", "src", src, "dest", dest, "bytes", n)
+	return nil
 }
 
 func (a *App) runDownload(job *Download) {
@@ -475,9 +491,9 @@ func (a *App) runDownload(job *Download) {
 	}()
 
 	workDir := a.hydraWorkDir(job)
+	slog.Info("download start", "id", job.ID, "name", job.Name, "url", job.URL, "dir", workDir)
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
-		job.Status = "error"
-		job.Error = err.Error()
+		failDownload(job, "mkdir", err)
 		return
 	}
 
@@ -498,15 +514,6 @@ func (a *App) runDownload(job *Download) {
 		URLs: []string{job.URL},
 		Dir:  workDir,
 		Out:  job.RemoteName,
-	}
-	if job.Checksum != "" {
-		cs, err := hydra.ParseChecksum(job.Checksum)
-		if err != nil {
-			job.Status = "error"
-			job.Error = err.Error()
-			return
-		}
-		req.Checksum = cs
 	}
 
 	var res hydra.Result
@@ -534,9 +541,11 @@ func (a *App) runDownload(job *Download) {
 		}
 		job.Error = err.Error()
 		if attempt == downloadRetries {
-			job.Status = "error"
+			failDownload(job, "hydra", err)
 			return
 		}
+		wait := downloadRetryWait << attempt
+		slog.Warn("download retry", "id", job.ID, "name", job.Name, "attempt", attempt+1, "wait", wait, "err", err)
 		a.saveJobs()
 	}
 
@@ -544,16 +553,15 @@ func (a *App) runDownload(job *Download) {
 	job.Written = res.Size
 	dest := filepath.Join(a.dir, job.Name)
 	downloaded := res.Path
+	slog.Info("download finished", "id", job.ID, "name", job.Name, "path", downloaded, "dest", dest, "size", res.Size)
 	if archiveExt(job.RemoteName) != "" || archiveExt(job.URL) != "" {
 		if err := extractArchive(downloaded, dest); err != nil {
-			job.Status = "error"
-			job.Error = err.Error()
+			failDownload(job, "extract", err)
 			return
 		}
 	} else if downloaded != dest {
 		if err := relocateFile(downloaded, dest); err != nil {
-			job.Status = "error"
-			job.Error = err.Error()
+			failDownload(job, "relocate", err)
 			return
 		}
 	}
@@ -561,16 +569,16 @@ func (a *App) runDownload(job *Download) {
 	a.clearHydraWorkDir(job)
 
 	if err := validateTileset(dest); err != nil {
-		job.Status = "error"
-		job.Error = err.Error()
+		failDownload(job, "validate", err)
 		return
 	}
 	if _, err := a.addFile(dest); err != nil {
-		job.Status = "error"
-		job.Error = err.Error()
+		failDownload(job, "add", err)
 		return
 	}
 	job.Status = "done"
+	a.rememberChecksum(job.Name, a.catalogChecksum(job.Name, job.Checksum))
+	slog.Info("download done", "id", job.ID, "name", job.Name, "path", dest)
 }
 
 type rateTransport struct {
@@ -616,6 +624,7 @@ func (b *rateLimitedBody) Read(p []byte) (int, error) {
 func (b *rateLimitedBody) Close() error { return b.r.Close() }
 
 func extractArchive(src, dest string) error {
+	slog.Info("extract archive", "src", src, "dest", dest)
 	lower := strings.ToLower(src)
 	switch {
 	case strings.HasSuffix(lower, ".tar.gz"), strings.HasSuffix(lower, ".tgz"):
@@ -721,7 +730,18 @@ func writeFile(dest string, r io.Reader) error {
 		os.Remove(tmp)
 		return err
 	}
-	return os.Rename(tmp, dest)
+	if err := os.Rename(tmp, dest); err != nil {
+		slog.Warn("extract rename failed", "src", tmp, "dest", dest, "err", err)
+		return err
+	}
+	slog.Info("extract renamed", "src", tmp, "dest", dest)
+	return nil
+}
+
+func failDownload(job *Download, stage string, err error) {
+	slog.Warn("download failed", "id", job.ID, "name", job.Name, "stage", stage, "err", err)
+	job.Status = "error"
+	job.Error = err.Error()
 }
 
 func (a *App) finishCanceled(job *Download) {
@@ -730,8 +750,10 @@ func (a *App) finishCanceled(job *Download) {
 	a.mu.Unlock()
 	if stopping {
 		job.Status = "paused"
+		slog.Info("download paused", "id", job.ID, "name", job.Name, "written", job.Written, "total", job.Total)
 	} else {
 		job.Status = "cancelled"
+		slog.Info("download cancelled", "id", job.ID, "name", job.Name)
 		a.clearHydraWorkDir(job)
 	}
 	job.Error = ""

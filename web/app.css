@@ -410,6 +410,8 @@ body {
 .jobs-head {
   align-items: center;
   margin: 8px 0;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 .jobs-head h2 { margin: 0; }
 .storage-meter {
@@ -673,6 +675,13 @@ body {
 .pill-danger {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
+}
+.pill-warn {
+  color: var(--gold-2);
+  border-color: color-mix(in srgb, var(--gold) 55%, var(--line));
+}
+.card-hash-bad {
+  border-color: color-mix(in srgb, var(--gold) 45%, var(--line));
 }
 .card-broken {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));

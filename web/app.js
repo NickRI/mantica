@@ -83,6 +83,15 @@ const I18N = {
     geocoder_fail: "fail",
     geocoder_idle: "—",
     reverse_here: "Адрес",
+    verify_btn: "Проверить",
+    verifying_btn: "Проверка…",
+    hash_ok: "Хеш ок",
+    hash_bad: "Хеш сломан",
+    hash_error: "Ошибка хеша",
+    hash_mismatch_hint: "Ожидался {expected}, получено {actual}",
+    clear_orphans: "Удалить орфаны",
+    orphans_removed: "Удалено орфанов: {n}",
+    orphans_none: "Орфанов нет",
   },
   en: {
     brand: "Mantica",
@@ -153,6 +162,15 @@ const I18N = {
     geocoder_fail: "fail",
     geocoder_idle: "—",
     reverse_here: "Address",
+    verify_btn: "Verify",
+    verifying_btn: "Verifying…",
+    hash_ok: "Hash ok",
+    hash_bad: "Hash broken",
+    hash_error: "Hash error",
+    hash_mismatch_hint: "Expected {expected}, got {actual}",
+    clear_orphans: "Remove orphans",
+    orphans_removed: "Orphans removed: {n}",
+    orphans_none: "No orphans",
   },
 };
 
@@ -612,26 +630,56 @@ function renderMaps() {
   root.innerHTML = items
     .map((m) => {
       const broken = Boolean(m.error);
+      const hashBad = m.hash_status === "mismatch" || m.hash_status === "error";
+      const verifying = m.hash_status === "running";
       const active =
         !broken && state.active?.type === "local" && state.active.id === m.id && state.active.kind === (m.kind || "mbtiles")
           ? " active"
           : "";
-      const pill = broken
-        ? `<span class="pill pill-danger">${t("map_broken")}</span>`
-        : `<span class="pill">${escapeHtml(m.kind || "mbtiles")} · ${escapeHtml(m.format || "—")}</span>`;
+      let pill;
+      if (broken) {
+        pill = `<span class="pill pill-danger">${t("map_broken")}</span>`;
+      } else if (m.hash_status === "mismatch") {
+        pill = `<span class="pill pill-warn">${t("hash_bad")}</span>`;
+      } else if (m.hash_status === "error") {
+        pill = `<span class="pill pill-warn">${t("hash_error")}</span>`;
+      } else if (m.hash_status === "ok") {
+        pill = `<span class="pill">${t("hash_ok")}</span>`;
+      } else {
+        pill = `<span class="pill">${escapeHtml(m.kind || "mbtiles")} · ${escapeHtml(m.format || "—")}</span>`;
+      }
+      let hashMeta = "";
+      if (m.hash_status === "mismatch") {
+        hashMeta = `<p class="meta map-error">${escapeHtml(fmtTpl("hash_mismatch_hint", { expected: m.checksum || "—", actual: m.hash_actual || "—" }))}</p>`;
+      } else if (m.hash_error && m.hash_status === "error") {
+        hashMeta = `<p class="meta map-error">${escapeHtml(m.hash_error)}</p>`;
+      }
       const body = broken
         ? `<p class="meta map-error">${escapeHtml(m.error)}</p>
            <p class="meta">${fmtSize(m.size)}</p>`
         : `<p>${escapeHtml(m.description || m.id)}</p>
-           <p class="meta">${m.minzoom}–${m.maxzoom} · ${fmtSize(m.size)}</p>`;
-      return `<article class="card${active}${broken ? " card-broken" : ""}" data-id="${escapeHtml(m.id)}" data-kind="${escapeHtml(m.kind || "mbtiles")}" data-broken="${broken ? "1" : "0"}">
+           <p class="meta">${m.minzoom}–${m.maxzoom} · ${fmtSize(m.size)}</p>
+           ${hashMeta}`;
+      const hashPct =
+        m.hash_total > 0 ? Math.min(100, Math.round((m.hash_written / m.hash_total) * 100)) : 0;
+      const progress = verifying
+        ? `<div class="progress"><i style="width:${hashPct}%"></i></div>
+           <p class="meta">${hashPct}%</p>`
+        : "";
+      const verifyBtn =
+        m.checksum && !broken
+          ? `<button class="btn secondary" data-verify="${escapeHtml(m.id)}" data-kind="${escapeHtml(m.kind || "mbtiles")}" type="button"${verifying ? " disabled" : ""}>${t(verifying ? "verifying_btn" : "verify_btn")}</button>`
+          : "";
+      return `<article class="card${active}${broken ? " card-broken" : ""}${hashBad && !broken ? " card-hash-bad" : ""}" data-id="${escapeHtml(m.id)}" data-kind="${escapeHtml(m.kind || "mbtiles")}" data-broken="${broken ? "1" : "0"}">
         <div class="card-row">
           <h3><span>${escapeHtml(m.name)}</span></h3>
           ${pill}
         </div>
         ${body}
+        ${progress}
         <div class="card-row">
           <span class="meta">${escapeHtml(m.id)}</span>
+          ${verifyBtn}
           <button class="btn danger" data-del="${escapeHtml(m.id)}" data-kind="${escapeHtml(m.kind || "mbtiles")}" type="button">${t("delete")}</button>
         </div>
       </article>`;
@@ -639,7 +687,7 @@ function renderMaps() {
     .join("");
   root.querySelectorAll(".card").forEach((el) => {
     el.onclick = (e) => {
-      if (e.target.dataset.del) return;
+      if (e.target.dataset.del || e.target.dataset.verify) return;
       const item = state.maps.find((m) => m.id === el.dataset.id && (m.kind || "mbtiles") === el.dataset.kind);
       if (!item) return;
       if (item.error) {
@@ -647,6 +695,17 @@ function renderMaps() {
         return;
       }
       showLocal(item);
+    };
+  });
+  root.querySelectorAll("[data-verify]").forEach((btn) => {
+    btn.onclick = async (e) => {
+      e.stopPropagation();
+      await api(`/api/maps/${encodeURIComponent(btn.dataset.verify)}/verify?kind=${encodeURIComponent(btn.dataset.kind)}`, {
+        method: "POST",
+        body: "{}",
+      });
+      await loadMaps();
+      pollJobs();
     };
   });
   root.querySelectorAll("[data-del]").forEach((btn) => {
@@ -945,7 +1004,10 @@ async function pollJobs() {
   state.jobs = await api("/api/downloads");
   renderJobs();
   renderCatalog();
-  if (state.jobs.some((j) => j.status === "running")) {
+  const downloading = state.jobs.some((j) => j.status === "running");
+  const verifying = state.maps.some((m) => m.hash_status === "running");
+  if (downloading || verifying) {
+    if (verifying) await loadMaps();
     setTimeout(pollJobs, 700);
   } else {
     loadMaps();
@@ -956,6 +1018,12 @@ $("search").oninput = renderMaps;
 $("catalog-search").oninput = renderCatalog;
 $("clear-completed").onclick = async () => {
   await api("/api/downloads/clear-completed", { method: "POST", body: "{}" });
+  pollJobs();
+};
+$("clear-orphans").onclick = async () => {
+  const out = await api("/api/downloads/clear-orphans", { method: "POST", body: "{}" });
+  const n = out?.removed || 0;
+  toast(n ? fmtTpl("orphans_removed", { n }) : t("orphans_none"), "ok");
   pollJobs();
 };
 
