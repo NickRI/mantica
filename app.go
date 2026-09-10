@@ -126,6 +126,7 @@ func newApp(dir, geocoderKeysPath string, geocodeCacheBytes int64) (*App, error)
 	a.rebuildGeo()
 	a.loadJobs()
 	a.loadHashes()
+	a.clearOrphanDownloads()
 	if err := a.scan(); err != nil {
 		return nil, err
 	}

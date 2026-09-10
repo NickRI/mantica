@@ -36,8 +36,9 @@ type hashStore struct {
 }
 
 var (
-	errNoChecksum = errors.New("no checksum")
-	errVerifyBusy = errors.New("verification already running")
+	errNoChecksum      = errors.New("no checksum")
+	errVerifyBusy      = errors.New("verification already running")
+	errAlreadyVerified = errors.New("already verified")
 )
 
 func (a *App) hashesPath() string {
@@ -167,12 +168,15 @@ func (a *App) startVerify(id, kind string) (*HashResult, error) {
 		a.mu.Unlock()
 		return nil, errNoChecksum
 	}
-	if len(a.verifyCancel) > 0 {
-		if rec := a.hashes.Results[name]; rec != nil && rec.Status == "running" {
-			out := *rec
-			a.mu.Unlock()
+	if rec := a.hashes.Results[name]; rec != nil {
+		out := *rec
+		a.mu.Unlock()
+		if rec.Status == "running" {
 			return &out, nil
 		}
+		return &out, errAlreadyVerified
+	}
+	if len(a.verifyCancel) > 0 {
 		a.mu.Unlock()
 		return nil, errVerifyBusy
 	}
@@ -308,6 +312,9 @@ func (a *App) clearOrphanDownloads() int {
 			panic(err)
 		}
 		removed++
+	}
+	if removed > 0 {
+		slog.Info("orphan downloads cleared", "removed", removed)
 	}
 	return removed
 }

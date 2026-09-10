@@ -676,12 +676,19 @@ body {
   color: var(--danger);
   border-color: color-mix(in srgb, var(--danger) 55%, var(--line));
 }
-.pill-warn {
-  color: var(--gold-2);
-  border-color: color-mix(in srgb, var(--gold) 55%, var(--line));
+.pill-ok {
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 55%, var(--line));
+}
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  flex-shrink: 0;
 }
 .card-hash-bad {
-  border-color: color-mix(in srgb, var(--gold) 45%, var(--line));
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
 }
 .card-broken {
   border-color: color-mix(in srgb, var(--danger) 45%, var(--line));

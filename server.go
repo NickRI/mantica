@@ -45,7 +45,6 @@ func run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 	mux.HandleFunc("DELETE /api/downloads/{id}", app.handleDeleteDownload)
 	mux.HandleFunc("POST /api/downloads/{id}/cancel", app.handleCancelDownload)
 	mux.HandleFunc("POST /api/downloads/clear-completed", app.handleClearCompletedDownloads)
-	mux.HandleFunc("POST /api/downloads/clear-orphans", app.handleClearOrphanDownloads)
 	mux.HandleFunc("POST /api/downloads", app.handleStartDownload)
 	mux.HandleFunc("GET /api/storage", app.handleStorage)
 	mux.HandleFunc("GET /api/settings", app.handleGetSettings)
@@ -236,7 +235,7 @@ func (a *App) handleVerifyMap(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		if errors.Is(err, errVerifyBusy) {
+		if errors.Is(err, errAlreadyVerified) || errors.Is(err, errVerifyBusy) {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
@@ -244,11 +243,6 @@ func (a *App) handleVerifyMap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusAccepted, rec)
-}
-
-func (a *App) handleClearOrphanDownloads(w http.ResponseWriter, r *http.Request) {
-	n := a.clearOrphanDownloads()
-	writeJSON(w, http.StatusOK, map[string]int{"removed": n})
 }
 
 func (a *App) handleStartDownload(w http.ResponseWriter, r *http.Request) {

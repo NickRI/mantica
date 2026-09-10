@@ -89,9 +89,6 @@ const I18N = {
     hash_bad: "Хеш сломан",
     hash_error: "Ошибка хеша",
     hash_mismatch_hint: "Ожидался {expected}, получено {actual}",
-    clear_orphans: "Удалить орфаны",
-    orphans_removed: "Удалено орфанов: {n}",
-    orphans_none: "Орфанов нет",
   },
   en: {
     brand: "Mantica",
@@ -168,9 +165,6 @@ const I18N = {
     hash_bad: "Hash broken",
     hash_error: "Hash error",
     hash_mismatch_hint: "Expected {expected}, got {actual}",
-    clear_orphans: "Remove orphans",
-    orphans_removed: "Orphans removed: {n}",
-    orphans_none: "No orphans",
   },
 };
 
@@ -636,17 +630,16 @@ function renderMaps() {
         !broken && state.active?.type === "local" && state.active.id === m.id && state.active.kind === (m.kind || "mbtiles")
           ? " active"
           : "";
-      let pill;
-      if (broken) {
-        pill = `<span class="pill pill-danger">${t("map_broken")}</span>`;
+      const kindPill = broken
+        ? `<span class="pill pill-danger">${t("map_broken")}</span>`
+        : `<span class="pill">${escapeHtml(m.kind || "mbtiles")} · ${escapeHtml(m.format || "—")}</span>`;
+      let hashPill = "";
+      if (m.hash_status === "ok") {
+        hashPill = `<span class="pill pill-ok">${t("hash_ok")}</span>`;
       } else if (m.hash_status === "mismatch") {
-        pill = `<span class="pill pill-warn">${t("hash_bad")}</span>`;
+        hashPill = `<span class="pill pill-danger">${t("hash_bad")}</span>`;
       } else if (m.hash_status === "error") {
-        pill = `<span class="pill pill-warn">${t("hash_error")}</span>`;
-      } else if (m.hash_status === "ok") {
-        pill = `<span class="pill">${t("hash_ok")}</span>`;
-      } else {
-        pill = `<span class="pill">${escapeHtml(m.kind || "mbtiles")} · ${escapeHtml(m.format || "—")}</span>`;
+        hashPill = `<span class="pill pill-danger">${t("hash_error")}</span>`;
       }
       let hashMeta = "";
       if (m.hash_status === "mismatch") {
@@ -666,14 +659,15 @@ function renderMaps() {
         ? `<div class="progress"><i style="width:${hashPct}%"></i></div>
            <p class="meta">${hashPct}%</p>`
         : "";
+      const verified = m.hash_status === "ok" || m.hash_status === "mismatch" || m.hash_status === "error";
       const verifyBtn =
-        m.checksum && !broken
-          ? `<button class="btn secondary" data-verify="${escapeHtml(m.id)}" data-kind="${escapeHtml(m.kind || "mbtiles")}" type="button"${verifying ? " disabled" : ""}>${t(verifying ? "verifying_btn" : "verify_btn")}</button>`
+        m.checksum && !broken && !verified && !verifying
+          ? `<button class="btn secondary" data-verify="${escapeHtml(m.id)}" data-kind="${escapeHtml(m.kind || "mbtiles")}" type="button">${t("verify_btn")}</button>`
           : "";
       return `<article class="card${active}${broken ? " card-broken" : ""}${hashBad && !broken ? " card-hash-bad" : ""}" data-id="${escapeHtml(m.id)}" data-kind="${escapeHtml(m.kind || "mbtiles")}" data-broken="${broken ? "1" : "0"}">
         <div class="card-row">
           <h3><span>${escapeHtml(m.name)}</span></h3>
-          ${pill}
+          <span class="pills">${kindPill}${hashPill}</span>
         </div>
         ${body}
         ${progress}
@@ -1018,12 +1012,6 @@ $("search").oninput = renderMaps;
 $("catalog-search").oninput = renderCatalog;
 $("clear-completed").onclick = async () => {
   await api("/api/downloads/clear-completed", { method: "POST", body: "{}" });
-  pollJobs();
-};
-$("clear-orphans").onclick = async () => {
-  const out = await api("/api/downloads/clear-orphans", { method: "POST", body: "{}" });
-  const n = out?.removed || 0;
-  toast(n ? fmtTpl("orphans_removed", { n }) : t("orphans_none"), "ok");
   pollJobs();
 };
 
