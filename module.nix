@@ -42,8 +42,8 @@ in
 
     tilesDir = lib.mkOption {
       type = lib.types.path;
-      default = "/var/lib/mantica/tilesets";
-      description = "Directory with *.mbtiles / *.pmtiles files (-dir).";
+      default = "/var/lib/mantica";
+      description = "Data root passed as -dir. Contains tilesets/, settings.json, downloads/, caches.";
     };
 
     authUserFile = lib.mkOption {
@@ -67,7 +67,7 @@ in
     geocodeCache = lib.mkOption {
       type = lib.types.str;
       default = "32MB";
-      description = "Geocode LRU cache size (human-readable, e.g. 32MB, 1GiB; 0 disables). Stored as tilesDir/.geocode-cache.gz.";
+      description = "Geocode LRU cache size (human-readable, e.g. 32MB, 1GiB; 0 disables). Stored as <tilesDir>/geocode-cache.gz.";
     };
   };
 
@@ -93,6 +93,8 @@ in
 
     systemd.tmpfiles.rules = [
       "d ${cfg.tilesDir} 0755 ${cfg.user} ${cfg.group} -"
+      "d ${cfg.tilesDir}/tilesets 0755 ${cfg.user} ${cfg.group} -"
+      "d ${cfg.tilesDir}/downloads 0755 ${cfg.user} ${cfg.group} -"
     ];
 
     systemd.services.mantica = {

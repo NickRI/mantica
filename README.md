@@ -1,7 +1,7 @@
 <div align="center">
 
   <p>
-    <img src="logo.svg" width="220" alt="Mantica">
+    <img src="internal/app/logo.svg" width="220" alt="Mantica">
   </p>
 
   <h1>Mantica</h1>
@@ -53,7 +53,7 @@ Default listen: `127.0.0.1:8091` (NixOS module). CLI default is `:8080`.
 ```nix
 {
   services.mantica.enable = true;
-  services.mantica.tilesDir = "/var/lib/mantica/tilesets";
+  services.mantica.tilesDir = "/var/lib/mantica";
   # Optional Basic auth (both or neither):
   # services.mantica.authUserFile = config.sops.secrets."mantica/username".path;
   # services.mantica.authPassFile = config.sops.secrets."mantica/password".path;
@@ -77,17 +77,28 @@ tar -xzf mantica-linux-amd64.tar.gz   # → ./mantica
 ## Run locally
 
 ```sh
-go run . -dir ./tilesets -listen :8080
+go run . -dir . -listen :8080
 # with auth:
-go run . -dir ./tilesets -auth-user USER -auth-pass PASS
+go run . -dir . -auth-user USER -auth-pass PASS
 ```
 
 ```sh
 nix build
-./result/bin/mantica -dir ./tilesets
+./result/bin/mantica -dir .
 ```
 
-Put tile archives in `-dir` (default `./tilesets`). Runtime state (`.settings.json`, download jobs, geocode cache) lives there too — keep it out of git.
+`-dir` is the data root (default `.`):
+
+| Path | Purpose |
+|------|---------|
+| `<dir>/tilesets/` | `*.mbtiles` / `*.pmtiles` |
+| `<dir>/settings.json` | UI settings |
+| `<dir>/downloads.json` | Download jobs |
+| `<dir>/hashes.json` | Checksum verify state |
+| `<dir>/geocode-cache.gz` | Geocode LRU |
+| `<dir>/downloads/` | In-progress download workdirs |
+
+Keep runtime state out of git.
 
 ## Options (NixOS)
 
@@ -96,7 +107,7 @@ Put tile archives in `-dir` (default `./tilesets`). Runtime state (`.settings.js
 | `services.mantica.enable` | — | Enable service |
 | `services.mantica.listenAddress` | `127.0.0.1` | Bind address |
 | `services.mantica.port` | `8091` | Listen port |
-| `services.mantica.tilesDir` | `/var/lib/mantica/tilesets` | Tiles + runtime state |
+| `services.mantica.tilesDir` | `/var/lib/mantica` | Data root (`-dir`) |
 | `services.mantica.authUserFile` | `null` | Basic auth user file (with `authPassFile`) |
 | `services.mantica.authPassFile` | `null` | Basic auth password file |
 | `services.mantica.geocoderKeysFile` | `null` | JSON API keys for geocoders |
