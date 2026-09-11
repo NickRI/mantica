@@ -1,6 +1,6 @@
 .PHONY: build release-artifacts clean
 
-VERSION ?= 0.1.5
+VERSION ?= 0.1.6
 COMMIT  ?= $(shell git rev-parse --short=12 HEAD 2>/dev/null || echo unknown)
 DIST    ?= dist
 LDFLAGS  = -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT)
