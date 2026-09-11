@@ -11,6 +11,21 @@ let
   authEnabled = cfg.authUserFile != null;
 in
 {
+  imports = [
+    (lib.mkRenamedOptionModule
+      [
+        "services"
+        "mantica"
+        "tilesDir"
+      ]
+      [
+        "services"
+        "mantica"
+        "workDir"
+      ]
+    )
+  ];
+
   options.services.mantica = {
     enable = lib.mkEnableOption "Mantica MBTiles/PMTiles map server with MapLibre UI";
 
@@ -40,7 +55,7 @@ in
       default = 8091;
     };
 
-    tilesDir = lib.mkOption {
+    workDir = lib.mkOption {
       type = lib.types.path;
       default = "/var/lib/mantica";
       description = "Data root passed as -dir. Contains tilesets/, settings.json, downloads/, caches.";
@@ -67,7 +82,7 @@ in
     geocodeCache = lib.mkOption {
       type = lib.types.str;
       default = "32MB";
-      description = "Geocode LRU cache size (human-readable, e.g. 32MB, 1GiB; 0 disables). Stored as <tilesDir>/geocode-cache.gz.";
+      description = "Geocode LRU cache size (human-readable, e.g. 32MB, 1GiB; 0 disables). Stored as <workDir>/geocode-cache.gz.";
     };
   };
 
@@ -83,7 +98,7 @@ in
       mantica = {
         isSystemUser = true;
         group = cfg.group;
-        home = cfg.tilesDir;
+        home = cfg.workDir;
       };
     };
 
@@ -92,9 +107,9 @@ in
     };
 
     systemd.tmpfiles.rules = [
-      "d ${cfg.tilesDir} 0755 ${cfg.user} ${cfg.group} -"
-      "d ${cfg.tilesDir}/tilesets 0755 ${cfg.user} ${cfg.group} -"
-      "d ${cfg.tilesDir}/downloads 0755 ${cfg.user} ${cfg.group} -"
+      "d ${cfg.workDir} 0755 ${cfg.user} ${cfg.group} -"
+      "d ${cfg.workDir}/tilesets 0755 ${cfg.user} ${cfg.group} -"
+      "d ${cfg.workDir}/downloads 0755 ${cfg.user} ${cfg.group} -"
     ];
 
     systemd.services.mantica = {
@@ -108,7 +123,7 @@ in
         Group = cfg.group;
         Restart = "on-failure";
         RestartSec = "5s";
-        WorkingDirectory = cfg.tilesDir;
+        WorkingDirectory = cfg.workDir;
         TimeoutStopSec = "60s";
         KillSignal = "SIGTERM";
       };
@@ -120,7 +135,7 @@ in
         ''}
         exec ${cfg.package}/bin/mantica \
           -listen ${cfg.listenAddress}:${toString cfg.port} \
-          -dir ${cfg.tilesDir} \
+          -dir ${cfg.workDir} \
           ${lib.optionalString authEnabled ''-auth-user "$auth_user" -auth-pass "$auth_pass"''} \
           ${lib.optionalString (cfg.geocoderKeysFile != null) "-geocoder-keys ${cfg.geocoderKeysFile}"} \
           -geocode-cache ${lib.escapeShellArg cfg.geocodeCache}
@@ -129,7 +144,7 @@ in
       restartTriggers = [
         cfg.listenAddress
         (toString cfg.port)
-        cfg.tilesDir
+        cfg.workDir
         cfg.geocodeCache
       ]
       ++ lib.optional authEnabled cfg.authUserFile

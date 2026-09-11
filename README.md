@@ -53,7 +53,7 @@ Default listen: `127.0.0.1:8091` (NixOS module). CLI default is `:8080`.
 ```nix
 {
   services.mantica.enable = true;
-  services.mantica.tilesDir = "/var/lib/mantica";
+  services.mantica.workDir = "/var/lib/mantica";
   # Optional Basic auth (both or neither):
   # services.mantica.authUserFile = config.sops.secrets."mantica/username".path;
   # services.mantica.authPassFile = config.sops.secrets."mantica/password".path;
@@ -107,7 +107,7 @@ Keep runtime state out of git.
 | `services.mantica.enable` | — | Enable service |
 | `services.mantica.listenAddress` | `127.0.0.1` | Bind address |
 | `services.mantica.port` | `8091` | Listen port |
-| `services.mantica.tilesDir` | `/var/lib/mantica` | Data root (`-dir`) |
+| `services.mantica.workDir` | `/var/lib/mantica` | Data root (`-dir`) |
 | `services.mantica.authUserFile` | `null` | Basic auth user file (with `authPassFile`) |
 | `services.mantica.authPassFile` | `null` | Basic auth password file |
 | `services.mantica.geocoderKeysFile` | `null` | JSON API keys for geocoders |
