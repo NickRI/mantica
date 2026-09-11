@@ -29,6 +29,7 @@ const I18N = {
     redownload_btn: "Перекачать",
     downloading_btn: "Качается…",
     resume_btn: "Продолжить",
+    pause_btn: "Пауза",
     clear_completed: "Очистить завершённые",
     disk_usage: "Диск: свободно {free} из {total}",
     maps_usage: "Карты · {used}",
@@ -106,6 +107,7 @@ const I18N = {
     redownload_btn: "Re-download",
     downloading_btn: "Downloading…",
     resume_btn: "Continue",
+    pause_btn: "Pause",
     clear_completed: "Clear completed",
     disk_usage: "Disk: {free} free of {total}",
     maps_usage: "Maps · {used}",
@@ -865,7 +867,8 @@ function renderJobs() {
             : 0;
       let actions = `<button class="btn danger" data-job-del="${escapeHtml(j.id)}" type="button">${t("delete")}</button>`;
       if (j.status === "running") {
-        actions = `<button class="btn secondary" data-job-cancel="${escapeHtml(j.id)}" type="button">${t("cancel")}</button>
+        actions = `<button class="btn secondary" data-job-pause="${escapeHtml(j.id)}" type="button">${t("pause_btn")}</button>
+             <button class="btn secondary" data-job-cancel="${escapeHtml(j.id)}" type="button">${t("cancel")}</button>
              ${actions}`;
       } else if (j.status === "error" || j.status === "paused") {
         actions = `<button class="btn" data-job-resume="${escapeHtml(j.id)}" type="button">${t("resume_btn")}</button>
@@ -880,6 +883,12 @@ function renderJobs() {
       </article>`;
     })
     .join("");
+  root.querySelectorAll("[data-job-pause]").forEach((btn) => {
+    btn.onclick = async () => {
+      await api(`/api/downloads/${btn.dataset.jobPause}/pause`, { method: "POST", body: "{}" });
+      pollJobs();
+    };
+  });
   root.querySelectorAll("[data-job-cancel]").forEach((btn) => {
     btn.onclick = async () => {
       await api(`/api/downloads/${btn.dataset.jobCancel}/cancel`, { method: "POST", body: "{}" });

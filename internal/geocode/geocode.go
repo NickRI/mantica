@@ -1,4 +1,4 @@
-package app
+package geocode
 
 import (
 	"context"
@@ -47,19 +47,19 @@ type GeocoderCard struct {
 	Enabled bool   `json:"enabled"`
 	BaseURL string `json:"base_url"`
 	HasKey  bool   `json:"has_key"`
-	Status  string `json:"status,omitempty"` // ok | fail | ""
+	Status  Status `json:"status,omitempty"`
 	Error   string `json:"error,omitempty"`
 }
 
-func defaultGeocoderCards() []GeocoderCard {
+func DefaultGeocoderCards() []GeocoderCard {
 	return []GeocoderCard{
 		{ID: GeocoderNominatim, Enabled: true, BaseURL: "https://nominatim.openstreetmap.org"},
 		{ID: GeocoderPhoton, Enabled: true, BaseURL: "https://photon.komoot.io"},
 	}
 }
 
-func normalizeGeocoderCards(cards []GeocoderCard) []GeocoderCard {
-	defaults := defaultGeocoderCards()
+func NormalizeGeocoderCards(cards []GeocoderCard) []GeocoderCard {
+	defaults := DefaultGeocoderCards()
 	byID := map[string]GeocoderCard{}
 	for _, d := range defaults {
 		byID[d.ID] = d
@@ -379,11 +379,6 @@ func toFloat(v any) (float64, error) {
 	}
 }
 
-type geoStatus struct {
-	Status string
-	Error  string
-}
-
 // GeoSearches is a failover chain: first successful provider wins.
 type GeoSearches []GeoSearch
 
@@ -443,7 +438,7 @@ func (s GeoSearches) Reverse(ctx context.Context, lat, lon float64, opts GeoOpts
 	return nil, fmt.Errorf("%s", strings.Join(errs, "; "))
 }
 
-func buildProviders(cards []GeocoderCard, keys map[string]string) []GeoSearch {
+func BuildProviders(cards []GeocoderCard, keys map[string]string) []GeoSearch {
 	httpClient := newGeoHTTP()
 	out := make([]GeoSearch, 0, len(cards))
 	for _, c := range cards {
@@ -461,7 +456,7 @@ func buildProviders(cards []GeocoderCard, keys map[string]string) []GeoSearch {
 	return out
 }
 
-func loadGeocoderKeys(path string) map[string]string {
+func LoadGeocoderKeys(path string) map[string]string {
 	out := map[string]string{}
 	if path == "" {
 		return out

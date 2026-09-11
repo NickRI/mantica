@@ -17,17 +17,29 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/NickRI/mantica/internal/download"
+	"github.com/NickRI/mantica/internal/geocode"
+	"github.com/NickRI/mantica/internal/hash"
 )
 
-//go:embed web/index.html web/app.css web/app.js web/vendor/maplibre-gl web/vendor/protomaps-basemaps web/vendor/protomaps-basemaps-assets
-var webFS embed.FS
+type Options struct {
+	Listen            string
+	Dir               string
+	AuthUser          string
+	AuthPass          string
+	GeocoderKeysPath  string
+	GeocodeCacheBytes int64
+	Version           string
+	Commit            string
+	Web               embed.FS
+	Logo              []byte
+	Catalog           []byte
+}
 
-//go:embed logo.svg
-var logoSVG []byte
-
-func Run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheBytes int64, version, commit string) error {
-	slog.Info("mantica starting", "version", version, "commit", commit, "dir", dir, "tiles", filepath.Join(dir, tilesetsDirName), "listen", listen)
-	app, err := newApp(dir, geocoderKeysPath, geocodeCacheBytes, version, commit)
+func Run(opts Options) error {
+	slog.Info("mantica starting", "version", opts.Version, "commit", opts.Commit, "dir", opts.Dir, "tiles", filepath.Join(opts.Dir, tilesetsDirName), "listen", opts.Listen)
+	app, err := newApp(opts.Dir, opts.GeocoderKeysPath, opts.GeocodeCacheBytes, opts.Version, opts.Commit, opts.Catalog)
 	if err != nil {
 		return err
 	}
@@ -46,6 +58,7 @@ func Run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 	mux.HandleFunc("GET /api/downloads/{id}", app.handleGetDownload)
 	mux.HandleFunc("DELETE /api/downloads/{id}", app.handleDeleteDownload)
 	mux.HandleFunc("POST /api/downloads/{id}/cancel", app.handleCancelDownload)
+	mux.HandleFunc("POST /api/downloads/{id}/pause", app.handlePauseDownload)
 	mux.HandleFunc("POST /api/downloads/{id}/resume", app.handleResumeDownload)
 	mux.HandleFunc("POST /api/downloads/clear-completed", app.handleClearCompletedDownloads)
 	mux.HandleFunc("POST /api/downloads", app.handleStartDownload)
@@ -62,7 +75,7 @@ func Run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 	mux.Handle("/services/", app.svc.Handler())
 	mux.HandleFunc("/pmtiles/", app.handlePMTiles)
 
-	static, err := fs.Sub(webFS, "web")
+	static, err := fs.Sub(opts.Web, "web")
 	if err != nil {
 		return err
 	}
@@ -72,21 +85,21 @@ func Run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 	mux.Handle("GET /vendor/", fileServer)
 	mux.HandleFunc("GET /favicon.svg", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/svg+xml")
-		w.Write(logoSVG)
+		w.Write(opts.Logo)
 	})
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, static, "index.html")
 	})
 
 	var handler http.Handler = mux
-	if authUser != "" {
-		handler = basicAuth(authUser, authPass, mux)
+	if opts.AuthUser != "" {
+		handler = basicAuth(opts.AuthUser, opts.AuthPass, mux)
 	}
 
-	srv := &http.Server{Addr: listen, Handler: handler}
+	srv := &http.Server{Addr: opts.Listen, Handler: handler}
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", listen, "dir", dir, "tiles", filepath.Join(dir, tilesetsDirName))
+		slog.Info("listening", "addr", opts.Listen, "dir", opts.Dir, "tiles", filepath.Join(opts.Dir, tilesetsDirName))
 		err := srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
@@ -109,7 +122,7 @@ func Run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 		_ = srv.Shutdown(shutdownCtx)
 		app.pauseAllDownloads()
 		if app.geoCache != nil {
-			app.geoCache.close()
+			app.geoCache.Close()
 		}
 		return nil
 	}
@@ -159,6 +172,18 @@ func readJSON(r *http.Request, v any) error {
 	return nil
 }
 
+func (a *App) handlePMTiles(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/pmtiles")
+	if path == "" {
+		path = "/"
+	}
+	r2 := r.Clone(r.Context())
+	u := *r.URL
+	u.Path = path
+	r2.URL = &u
+	a.pmtiles.ServeHTTP(w, r2)
+}
+
 func (a *App) handleListMaps(w http.ResponseWriter, r *http.Request) {
 	maps, err := a.listMaps()
 	if err != nil {
@@ -170,7 +195,11 @@ func (a *App) handleListMaps(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleDeleteMap(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	kind := r.URL.Query().Get("kind")
+	kind, err := a.resolveKind(id, r.URL.Query().Get("kind"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	if err := a.removeMap(id, kind); err != nil {
 		writeError(w, http.StatusInternalServerError, err)
 		return
@@ -197,7 +226,7 @@ func (a *App) handleCatalogDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	job, err := a.startDownload(item.URL, "", item.Checksum, req.Replace)
 	if err != nil {
-		if errors.Is(err, errAlreadyDownloaded) {
+		if errors.Is(err, download.ErrAlreadyDownloaded) {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
@@ -230,14 +259,31 @@ func (a *App) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (a *App) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
-	job, err := a.resumeDownload(r.PathValue("id"))
+func (a *App) handlePauseDownload(w http.ResponseWriter, r *http.Request) {
+	job, err := a.pauseDownload(r.PathValue("id"))
 	if err != nil {
-		if errors.Is(err, errJobNotFound) {
+		if errors.Is(err, download.ErrJobNotFound) {
 			http.NotFound(w, r)
 			return
 		}
-		if errors.Is(err, errResumeNotAllowed) {
+		if errors.Is(err, download.ErrPauseNotAllowed) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
+func (a *App) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
+	job, err := a.resumeDownload(r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, download.ErrJobNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if errors.Is(err, download.ErrResumeNotAllowed) {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
@@ -248,14 +294,18 @@ func (a *App) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handleVerifyMap(w http.ResponseWriter, r *http.Request) {
-	kind := r.URL.Query().Get("kind")
+	kind, err := a.resolveKind(r.PathValue("id"), r.URL.Query().Get("kind"))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
 	rec, err := a.startVerify(r.PathValue("id"), kind)
 	if err != nil {
-		if errors.Is(err, errNoChecksum) {
+		if errors.Is(err, hash.ErrNoChecksum) {
 			writeError(w, http.StatusBadRequest, err)
 			return
 		}
-		if errors.Is(err, errAlreadyVerified) || errors.Is(err, errVerifyBusy) {
+		if errors.Is(err, hash.ErrAlreadyVerified) || errors.Is(err, hash.ErrVerifyBusy) {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
@@ -278,7 +328,7 @@ func (a *App) handleStartDownload(w http.ResponseWriter, r *http.Request) {
 	}
 	job, err := a.startDownload(req.URL, req.Name, req.Checksum, req.Replace)
 	if err != nil {
-		if errors.Is(err, errAlreadyDownloaded) {
+		if errors.Is(err, download.ErrAlreadyDownloaded) {
 			writeError(w, http.StatusConflict, err)
 			return
 		}
@@ -320,10 +370,10 @@ func (a *App) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Language     string         `json:"language"`
-		Servers      []RemoteServer `json:"servers"`
-		RateLimitBps *int64         `json:"rate_limit_bps"`
-		Geocoders    []GeocoderCard `json:"geocoders"`
+		Language     string                 `json:"language"`
+		Servers      []RemoteServer         `json:"servers"`
+		RateLimitBps *int64                 `json:"rate_limit_bps"`
+		Geocoders    []geocode.GeocoderCard `json:"geocoders"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, err)
@@ -337,7 +387,7 @@ func (a *App) handlePutSettings(w http.ResponseWriter, r *http.Request) {
 		a.settings.Servers = req.Servers
 	}
 	if req.Geocoders != nil {
-		a.settings.Geocoders = normalizeGeocoderCards(req.Geocoders)
+		a.settings.Geocoders = geocode.NormalizeGeocoderCards(req.Geocoders)
 	}
 	var bps *int64
 	if req.RateLimitBps != nil {
@@ -362,13 +412,13 @@ func (a *App) handleListGeocoders(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *App) handlePutGeocoders(w http.ResponseWriter, r *http.Request) {
-	var cards []GeocoderCard
+	var cards []geocode.GeocoderCard
 	if err := readJSON(r, &cards); err != nil {
 		writeError(w, http.StatusBadRequest, err)
 		return
 	}
 	a.mu.Lock()
-	a.settings.Geocoders = normalizeGeocoderCards(cards)
+	a.settings.Geocoders = geocode.NormalizeGeocoderCards(cards)
 	a.mu.Unlock()
 	a.rebuildGeo()
 	if err := a.saveSettings(); err != nil {
@@ -381,7 +431,7 @@ func (a *App) handlePutGeocoders(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleTestGeocoder(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	a.mu.Lock()
-	var card *GeocoderCard
+	var card *geocode.GeocoderCard
 	for i := range a.settings.Geocoders {
 		if a.settings.Geocoders[i].ID == id {
 			card = &a.settings.Geocoders[i]
@@ -394,26 +444,26 @@ func (a *App) handleTestGeocoder(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	providers := buildProviders([]GeocoderCard{{ID: card.ID, Enabled: true, BaseURL: card.BaseURL}}, keys)
+	providers := geocode.BuildProviders([]geocode.GeocoderCard{{ID: card.ID, Enabled: true, BaseURL: card.BaseURL}}, keys)
 	if len(providers) == 0 {
 		writeError(w, http.StatusBadRequest, fmt.Errorf("unknown geocoder"))
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 	defer cancel()
-	res, err := providers[0].Search(ctx, "Berlin", GeoOpts{Limit: 1, Lang: a.settings.Language})
+	res, err := providers[0].Search(ctx, "Berlin", geocode.GeoOpts{Limit: 1, Lang: a.settings.Language})
 	if err != nil {
-		a.setGeoStatus(id, "fail", err.Error())
+		a.setGeoStatus(id, geocode.StatusFail, err.Error())
 		writeError(w, http.StatusBadGateway, err)
 		return
 	}
-	a.setGeoStatus(id, "ok", "")
+	a.setGeoStatus(id, geocode.StatusOK, "")
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "results": res})
 }
 
-func (a *App) geoOptsFromRequest(r *http.Request) GeoOpts {
+func (a *App) geoOptsFromRequest(r *http.Request) geocode.GeoOpts {
 	q := r.URL.Query()
-	opts := GeoOpts{Lang: a.settings.Language, Limit: 8}
+	opts := geocode.GeoOpts{Lang: a.settings.Language, Limit: 8}
 	if v := q.Get("limit"); v != "" {
 		n, err := strconv.Atoi(v)
 		if err == nil && n > 0 {
@@ -470,7 +520,7 @@ func (a *App) handleGeocode(w http.ResponseWriter, r *http.Request) {
 func (a *App) handleGeocodeAutocomplete(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	if q == "" {
-		writeJSON(w, http.StatusOK, map[string]any{"results": []GeoResult{}})
+		writeJSON(w, http.StatusOK, map[string]any{"results": []geocode.GeoResult{}})
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 15*time.Second)

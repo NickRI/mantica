@@ -36,7 +36,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := app.Run(*listen, *dir, *authUser, *authPass, *geocoderKeys, cacheBytes, version, commit); err != nil {
+	err = app.Run(app.Options{
+		Listen:            *listen,
+		Dir:               *dir,
+		AuthUser:          *authUser,
+		AuthPass:          *authPass,
+		GeocoderKeysPath:  *geocoderKeys,
+		GeocodeCacheBytes: cacheBytes,
+		Version:           version,
+		Commit:            commit,
+		Web:               webFS,
+		Logo:              logoSVG,
+		Catalog:           catalogJSON,
+	})
+	if err != nil {
 		slog.Error(err.Error())
 		os.Exit(1)
 	}

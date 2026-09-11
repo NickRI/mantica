@@ -1,11 +1,10 @@
-package app
+package tileset
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
 	"log"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,7 +13,7 @@ import (
 	"github.com/protomaps/go-pmtiles/pmtiles"
 )
 
-func newPMTilesServer(dir string) (*pmtiles.Server, error) {
+func NewPMTilesServer(dir string) (*pmtiles.Server, error) {
 	abs, err := filepath.Abs(dir)
 	if err != nil {
 		return nil, err
@@ -28,19 +27,7 @@ func newPMTilesServer(dir string) (*pmtiles.Server, error) {
 	return server, nil
 }
 
-func (a *App) handlePMTiles(w http.ResponseWriter, r *http.Request) {
-	path := strings.TrimPrefix(r.URL.Path, "/pmtiles")
-	if path == "" {
-		path = "/"
-	}
-	r2 := r.Clone(r.Context())
-	u := *r.URL
-	u.Path = path
-	r2.URL = &u
-	a.pmtiles.ServeHTTP(w, r2)
-}
-
-func findPMTiles(dir string) ([]string, error) {
+func FindPMTiles(dir string) ([]string, error) {
 	var out []string
 	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -67,7 +54,7 @@ func findPMTiles(dir string) ([]string, error) {
 	return out, err
 }
 
-func readPMTilesInfo(filename, baseDir string) (MapInfo, error) {
+func ReadPMTilesInfo(filename, baseDir string) (MapInfo, error) {
 	id, err := handlers.RelativePathID(filename, baseDir)
 	if err != nil {
 		return MapInfo{}, err
@@ -114,8 +101,8 @@ func readPMTilesInfo(filename, baseDir string) (MapInfo, error) {
 	e7 := 1e7
 	info := MapInfo{
 		ID:       id,
-		Name:     displayNameFromID(id),
-		Kind:     "pmtiles",
+		Name:     DisplayNameFromID(id),
+		Kind:     KindPMTiles,
 		Format:   pmtilesFormat(header.TileType),
 		MinZoom:  int(header.MinZoom),
 		MaxZoom:  int(header.MaxZoom),
@@ -133,7 +120,7 @@ func readPMTilesInfo(filename, baseDir string) (MapInfo, error) {
 	if v, ok := meta["description"].(string); ok {
 		info.Description = v
 	}
-	if metaName != "" && !isGenericMapName(metaName) {
+	if metaName != "" && !IsGenericMapName(metaName) {
 		info.Name = metaName
 	} else if metaName != "" && info.Description == "" {
 		info.Description = metaName
@@ -148,39 +135,6 @@ func readPMTilesInfo(filename, baseDir string) (MapInfo, error) {
 		}
 	}
 	return info, nil
-}
-
-func isGenericMapName(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
-	case "protomaps basemap", "protomaps", "basemap", "untitled", "map":
-		return true
-	default:
-		return false
-	}
-}
-
-func displayNameFromID(id string) string {
-	base := filepath.Base(id)
-	replacer := strings.NewReplacer("_", " ", "-", " ", "(", " ", ")", " ", ".", " ", "+", " ")
-	parts := strings.Fields(replacer.Replace(base))
-	for i, p := range parts {
-		if p == "" {
-			continue
-		}
-		lower := strings.ToLower(p)
-		switch lower {
-		case "odbl", "osm", "mvt", "pmtiles":
-			parts[i] = strings.ToUpper(lower)
-		default:
-			runes := []rune(lower)
-			runes[0] = []rune(strings.ToUpper(string(runes[0])))[0]
-			parts[i] = string(runes)
-		}
-	}
-	if len(parts) == 0 {
-		return id
-	}
-	return strings.Join(parts, " ")
 }
 
 func pmtilesFormat(t pmtiles.TileType) string {
@@ -200,34 +154,4 @@ func pmtilesFormat(t pmtiles.TileType) string {
 	default:
 		return "pmtiles"
 	}
-}
-
-func isPMTilesPath(path string) bool {
-	return strings.HasSuffix(strings.ToLower(path), ".pmtiles")
-}
-
-func tilesetPath(dir, id, kind string) string {
-	switch kind {
-	case "pmtiles":
-		return filepath.Join(dir, id+".pmtiles")
-	default:
-		return filepath.Join(dir, id+".mbtiles")
-	}
-}
-
-func detectMapKind(dir, id string) (string, error) {
-	pm := filepath.Join(dir, id+".pmtiles")
-	mb := filepath.Join(dir, id+".mbtiles")
-	_, errPM := os.Stat(pm)
-	_, errMB := os.Stat(mb)
-	if errPM == nil && errMB == nil {
-		return "", fmt.Errorf("both mbtiles and pmtiles exist for %s; pass kind=", id)
-	}
-	if errPM == nil {
-		return "pmtiles", nil
-	}
-	if errMB == nil {
-		return "mbtiles", nil
-	}
-	return "", os.ErrNotExist
 }

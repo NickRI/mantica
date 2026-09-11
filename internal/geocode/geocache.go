@@ -1,4 +1,4 @@
-package app
+package geocode
 
 import (
 	"compress/gzip"
@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-type geoCacheStore struct {
+type Cache struct {
 	mu       sync.Mutex
 	path     string
 	maxBytes int64
@@ -31,11 +31,11 @@ type geoCacheDisk struct {
 	Entries map[string]cachedGeoEntry `json:"entries"`
 }
 
-func openGeoCache(path string, maxBytes int64) *geoCacheStore {
+func OpenCache(path string, maxBytes int64) *Cache {
 	if maxBytes <= 0 {
 		return nil
 	}
-	c := &geoCacheStore{
+	c := &Cache{
 		path:     path,
 		maxBytes: maxBytes,
 		entries:  map[string]cachedGeoEntry{},
@@ -46,7 +46,7 @@ func openGeoCache(path string, maxBytes int64) *geoCacheStore {
 	return c
 }
 
-func (c *geoCacheStore) load() {
+func (c *Cache) load() {
 	f, err := os.Open(c.path)
 	if err != nil {
 		if !os.IsNotExist(err) {
@@ -74,7 +74,7 @@ func (c *geoCacheStore) load() {
 	c.evictLocked()
 }
 
-func (c *geoCacheStore) persistLoop() {
+func (c *Cache) persistLoop() {
 	for range c.saveCh {
 		time.Sleep(2 * time.Second)
 		for {
@@ -89,14 +89,14 @@ func (c *geoCacheStore) persistLoop() {
 	}
 }
 
-func (c *geoCacheStore) scheduleSave() {
+func (c *Cache) scheduleSave() {
 	select {
 	case c.saveCh <- struct{}{}:
 	default:
 	}
 }
 
-func (c *geoCacheStore) flush() {
+func (c *Cache) flush() {
 	c.mu.Lock()
 	if !c.dirty {
 		c.mu.Unlock()
@@ -142,7 +142,7 @@ func (c *geoCacheStore) flush() {
 	}
 }
 
-func (c *geoCacheStore) get(key string) ([]GeoResult, bool) {
+func (c *Cache) get(key string) ([]GeoResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	ent, ok := c.entries[key]
@@ -155,7 +155,7 @@ func (c *geoCacheStore) get(key string) ([]GeoResult, bool) {
 	return out, true
 }
 
-func (c *geoCacheStore) put(key string, results []GeoResult) {
+func (c *Cache) put(key string, results []GeoResult) {
 	raw, err := json.Marshal(results)
 	if err != nil {
 		return
@@ -169,7 +169,7 @@ func (c *geoCacheStore) put(key string, results []GeoResult) {
 	c.scheduleSave()
 }
 
-func (c *geoCacheStore) touchLocked(key string) {
+func (c *Cache) touchLocked(key string) {
 	for i, k := range c.order {
 		if k == key {
 			c.order = append(c.order[:i], c.order[i+1:]...)
@@ -179,7 +179,7 @@ func (c *geoCacheStore) touchLocked(key string) {
 	c.order = append(c.order, key)
 }
 
-func (c *geoCacheStore) evictLocked() {
+func (c *Cache) evictLocked() {
 	var total int64
 	for _, ent := range c.entries {
 		total += int64(ent.Bytes)
@@ -195,16 +195,16 @@ func (c *geoCacheStore) evictLocked() {
 	}
 }
 
-func (c *geoCacheStore) close() {
+func (c *Cache) Close() {
 	c.flush()
 }
 
 type cachedGeo struct {
 	inner GeoSearch
-	cache *geoCacheStore
+	cache *Cache
 }
 
-func wrapGeoCache(inner GeoSearch, cache *geoCacheStore) GeoSearch {
+func WrapCache(inner GeoSearch, cache *Cache) GeoSearch {
 	if cache == nil {
 		return inner
 	}
