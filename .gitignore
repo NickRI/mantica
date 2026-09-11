@@ -12,9 +12,3 @@ hashes.json
 geocode-cache.gz
 *.pmtiles
 *.mbtiles
-# legacy (pre-layout split); drop after next release
-.downloads/
-.downloads.json
-.geocode-cache.gz
-.settings.json
-.hashes.json

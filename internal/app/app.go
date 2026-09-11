@@ -19,6 +19,8 @@ import (
 	"golang.org/x/time/rate"
 )
 
+const tilesetsDirName = "tilesets"
+
 type App struct {
 	dir          string // data root (-dir)
 	tilesDir     string // <dir>/tilesets
@@ -86,8 +88,6 @@ func newApp(dir, geocoderKeysPath string, geocodeCacheBytes int64, version, comm
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, err
 	}
-	// TODO: remove migrateLayout in next release.
-	migrateLayout(dir)
 	tilesDir := filepath.Join(dir, tilesetsDirName)
 	if err := os.MkdirAll(tilesDir, 0o755); err != nil {
 		return nil, err
