@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -20,7 +20,10 @@ import (
 )
 
 type App struct {
-	dir          string
+	dir          string // data root (-dir)
+	tilesDir     string // <dir>/tilesets
+	version      string
+	commit       string
 	svc          *handlers.ServiceSet
 	pmtiles      *pmtiles.Server
 	mu           sync.Mutex
@@ -79,8 +82,14 @@ type MapInfo struct {
 	HashChecked  time.Time       `json:"hash_checked,omitempty"`
 }
 
-func newApp(dir, geocoderKeysPath string, geocodeCacheBytes int64) (*App, error) {
+func newApp(dir, geocoderKeysPath string, geocodeCacheBytes int64, version, commit string) (*App, error) {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil, err
+	}
+	// TODO: remove migrateLayout in next release.
+	migrateLayout(dir)
+	tilesDir := filepath.Join(dir, tilesetsDirName)
+	if err := os.MkdirAll(tilesDir, 0o755); err != nil {
 		return nil, err
 	}
 
@@ -99,13 +108,16 @@ func newApp(dir, geocoderKeysPath string, geocodeCacheBytes int64) (*App, error)
 		return nil, err
 	}
 
-	pmt, err := newPMTilesServer(dir)
+	pmt, err := newPMTilesServer(tilesDir)
 	if err != nil {
 		return nil, err
 	}
 
 	a := &App{
 		dir:          dir,
+		tilesDir:     tilesDir,
+		version:      version,
+		commit:       commit,
 		svc:          svc,
 		pmtiles:      pmt,
 		jobs:         make(map[string]*Download),
@@ -119,7 +131,7 @@ func newApp(dir, geocoderKeysPath string, geocodeCacheBytes int64) (*App, error)
 		catalog:      loadCatalog(),
 		geocoderKeys: loadGeocoderKeys(geocoderKeysPath),
 		geoStatus:    map[string]geoStatus{},
-		geoCache:     openGeoCache(filepath.Join(dir, ".geocode-cache.gz"), geocodeCacheBytes),
+		geoCache:     openGeoCache(filepath.Join(dir, "geocode-cache.gz"), geocodeCacheBytes),
 	}
 	a.loadSettings()
 	a.setRateLimit(a.settings.RateLimitBps)
@@ -146,7 +158,7 @@ func (a *App) catalogByID(id string) (CatalogItem, bool) {
 }
 
 func (a *App) settingsPath() string {
-	return filepath.Join(a.dir, ".settings.json")
+	return filepath.Join(a.dir, "settings.json")
 }
 
 func (a *App) loadSettings() {
@@ -207,19 +219,19 @@ func (a *App) saveSettings() error {
 }
 
 func (a *App) scan() error {
-	filenames, err := mbtiles.FindMBtiles(a.dir)
+	filenames, err := mbtiles.FindMBtiles(a.tilesDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
-	filenames = filterRuntimePaths(a.dir, filenames)
+	filenames = filterRuntimePaths(a.tilesDir, filenames)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	for _, filename := range filenames {
-		id, err := handlers.RelativePathID(filename, a.dir)
+		id, err := handlers.RelativePathID(filename, a.tilesDir)
 		if err != nil {
 			slog.Warn("skip mbtiles id", "path", filename, "err", err)
 			continue
@@ -236,7 +248,7 @@ func (a *App) scan() error {
 }
 
 func (a *App) addFile(filename string) (string, error) {
-	id, err := handlers.RelativePathID(filename, a.dir)
+	id, err := handlers.RelativePathID(filename, a.tilesDir)
 	if err != nil {
 		return "", err
 	}
@@ -260,12 +272,12 @@ func (a *App) addFile(filename string) (string, error) {
 func (a *App) removeMap(id, kind string) error {
 	if kind == "" {
 		var err error
-		kind, err = detectMapKind(a.dir, id)
+		kind, err = detectMapKind(a.tilesDir, id)
 		if err != nil {
 			return err
 		}
 	}
-	path := tilesetPath(a.dir, id, kind)
+	path := tilesetPath(a.tilesDir, id, kind)
 	a.forgetHash(filepath.Base(path))
 	if kind == "pmtiles" {
 		return os.Remove(path)
@@ -281,21 +293,21 @@ func (a *App) removeMap(id, kind string) error {
 }
 
 func (a *App) listMaps() ([]MapInfo, error) {
-	mbFiles, err := mbtiles.FindMBtiles(a.dir)
+	mbFiles, err := mbtiles.FindMBtiles(a.tilesDir)
 	if err != nil {
 		return nil, err
 	}
-	mbFiles = filterRuntimePaths(a.dir, mbFiles)
-	pmFiles, err := findPMTiles(a.dir)
+	mbFiles = filterRuntimePaths(a.tilesDir, mbFiles)
+	pmFiles, err := findPMTiles(a.tilesDir)
 	if err != nil {
 		return nil, err
 	}
 
 	out := make([]MapInfo, 0, len(mbFiles)+len(pmFiles))
 	for _, filename := range mbFiles {
-		info, err := readMapInfo(filename, a.dir)
+		info, err := readMapInfo(filename, a.tilesDir)
 		if err != nil {
-			out = append(out, brokenMapInfo(filename, a.dir, "mbtiles", err))
+			out = append(out, brokenMapInfo(filename, a.tilesDir, "mbtiles", err))
 			continue
 		}
 		if !a.svc.HasTileset(info.ID) {
@@ -306,9 +318,9 @@ func (a *App) listMaps() ([]MapInfo, error) {
 		out = append(out, info)
 	}
 	for _, filename := range pmFiles {
-		info, err := readPMTilesInfo(filename, a.dir)
+		info, err := readPMTilesInfo(filename, a.tilesDir)
 		if err != nil {
-			out = append(out, brokenMapInfo(filename, a.dir, "pmtiles", err))
+			out = append(out, brokenMapInfo(filename, a.tilesDir, "pmtiles", err))
 			continue
 		}
 		out = append(out, info)
@@ -409,7 +421,7 @@ func shortID(s string) string {
 	return hex.EncodeToString(sum[:6])
 }
 
-// filterRuntimePaths drops tiles under hidden runtime dirs (e.g. .downloads/).
+// filterRuntimePaths drops tiles under hidden dirs inside tilesets/.
 func filterRuntimePaths(base string, paths []string) []string {
 	out := paths[:0:0]
 	for _, p := range paths {

@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -20,19 +20,19 @@ const (
 )
 
 type GeoResult struct {
-	Label   string     `json:"label"`
-	Lat     float64    `json:"lat"`
-	Lon     float64    `json:"lon"`
-	BBox    []float64  `json:"bbox,omitempty"` // minLon,minLat,maxLon,maxLat
-	Source  string     `json:"source,omitempty"`
+	Label  string    `json:"label"`
+	Lat    float64   `json:"lat"`
+	Lon    float64   `json:"lon"`
+	BBox   []float64 `json:"bbox,omitempty"` // minLon,minLat,maxLon,maxLat
+	Source string    `json:"source,omitempty"`
 }
 
 type GeoOpts struct {
-	Limit    int
-	Lang     string
-	Lat      *float64
-	Lon      *float64
-	ViewBox  []float64 // minLon,minLat,maxLon,maxLat
+	Limit   int
+	Lang    string
+	Lat     *float64
+	Lon     *float64
+	ViewBox []float64 // minLon,minLat,maxLon,maxLat
 }
 
 type GeoSearch interface {

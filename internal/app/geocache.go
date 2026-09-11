@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"compress/gzip"
@@ -27,8 +27,8 @@ type cachedGeoEntry struct {
 }
 
 type geoCacheDisk struct {
-	Order   []string                   `json:"order"`
-	Entries map[string]cachedGeoEntry  `json:"entries"`
+	Order   []string                  `json:"order"`
+	Entries map[string]cachedGeoEntry `json:"entries"`
 }
 
 func openGeoCache(path string, maxBytes int64) *geoCacheStore {

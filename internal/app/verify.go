@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -42,7 +42,7 @@ var (
 )
 
 func (a *App) hashesPath() string {
-	return filepath.Join(a.dir, ".hashes.json")
+	return filepath.Join(a.dir, "hashes.json")
 }
 
 func (a *App) loadHashes() {
@@ -155,12 +155,12 @@ func (a *App) decorateHash(info *MapInfo) {
 func (a *App) startVerify(id, kind string) (*HashResult, error) {
 	if kind == "" {
 		var err error
-		kind, err = detectMapKind(a.dir, id)
+		kind, err = detectMapKind(a.tilesDir, id)
 		if err != nil {
 			return nil, err
 		}
 	}
-	path := tilesetPath(a.dir, id, kind)
+	path := tilesetPath(a.tilesDir, id, kind)
 	name := filepath.Base(path)
 	a.mu.Lock()
 	expected := a.expectedChecksumLocked(name)
@@ -284,7 +284,7 @@ func (a *App) cancelVerifies() {
 }
 
 func (a *App) clearOrphanDownloads() int {
-	root := filepath.Join(a.dir, ".downloads")
+	root := filepath.Join(a.dir, "downloads")
 	entries, err := os.ReadDir(root)
 	if err != nil {
 		if os.IsNotExist(err) {

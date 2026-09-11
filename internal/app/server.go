@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -24,8 +25,9 @@ var webFS embed.FS
 //go:embed logo.svg
 var logoSVG []byte
 
-func run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheBytes int64) error {
-	app, err := newApp(dir, geocoderKeysPath, geocodeCacheBytes)
+func Run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheBytes int64, version, commit string) error {
+	slog.Info("mantica starting", "version", version, "commit", commit, "dir", dir, "tiles", filepath.Join(dir, tilesetsDirName), "listen", listen)
+	app, err := newApp(dir, geocoderKeysPath, geocodeCacheBytes, version, commit)
 	if err != nil {
 		return err
 	}
@@ -44,6 +46,7 @@ func run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 	mux.HandleFunc("GET /api/downloads/{id}", app.handleGetDownload)
 	mux.HandleFunc("DELETE /api/downloads/{id}", app.handleDeleteDownload)
 	mux.HandleFunc("POST /api/downloads/{id}/cancel", app.handleCancelDownload)
+	mux.HandleFunc("POST /api/downloads/{id}/resume", app.handleResumeDownload)
 	mux.HandleFunc("POST /api/downloads/clear-completed", app.handleClearCompletedDownloads)
 	mux.HandleFunc("POST /api/downloads", app.handleStartDownload)
 	mux.HandleFunc("GET /api/storage", app.handleStorage)
@@ -83,7 +86,7 @@ func run(listen, dir, authUser, authPass, geocoderKeysPath string, geocodeCacheB
 	srv := &http.Server{Addr: listen, Handler: handler}
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("listening", "addr", listen, "dir", dir)
+		slog.Info("listening", "addr", listen, "dir", dir, "tiles", filepath.Join(dir, tilesetsDirName))
 		err := srv.ListenAndServe()
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			errCh <- err
@@ -227,6 +230,23 @@ func (a *App) handleCancelDownload(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (a *App) handleResumeDownload(w http.ResponseWriter, r *http.Request) {
+	job, err := a.resumeDownload(r.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, errJobNotFound) {
+			http.NotFound(w, r)
+			return
+		}
+		if errors.Is(err, errResumeNotAllowed) {
+			writeError(w, http.StatusConflict, err)
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, job)
+}
+
 func (a *App) handleVerifyMap(w http.ResponseWriter, r *http.Request) {
 	kind := r.URL.Query().Get("kind")
 	rec, err := a.startVerify(r.PathValue("id"), kind)
@@ -284,7 +304,15 @@ func (a *App) handleStorage(w http.ResponseWriter, r *http.Request) {
 
 func (a *App) handleGetSettings(w http.ResponseWriter, r *http.Request) {
 	a.mu.Lock()
-	out := a.settings
+	out := struct {
+		Settings
+		Version string `json:"version"`
+		Commit  string `json:"commit"`
+	}{
+		Settings: a.settings,
+		Version:  a.version,
+		Commit:   a.commit,
+	}
 	a.mu.Unlock()
 	out.Geocoders = a.geocoderCardsPublic()
 	writeJSON(w, http.StatusOK, out)

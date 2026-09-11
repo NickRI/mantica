@@ -28,6 +28,7 @@ const I18N = {
     download_btn: "Скачать",
     redownload_btn: "Перекачать",
     downloading_btn: "Качается…",
+    resume_btn: "Продолжить",
     clear_completed: "Очистить завершённые",
     disk_usage: "Диск: свободно {free} из {total}",
     maps_usage: "Карты · {used}",
@@ -104,6 +105,7 @@ const I18N = {
     download_btn: "Download",
     redownload_btn: "Re-download",
     downloading_btn: "Downloading…",
+    resume_btn: "Continue",
     clear_completed: "Clear completed",
     disk_usage: "Disk: {free} free of {total}",
     maps_usage: "Maps · {used}",
@@ -861,11 +863,14 @@ function renderJobs() {
           : j.status === "done"
             ? 100
             : 0;
-      const actions =
-        j.status === "running"
-          ? `<button class="btn secondary" data-job-cancel="${escapeHtml(j.id)}" type="button">${t("cancel")}</button>
-             <button class="btn danger" data-job-del="${escapeHtml(j.id)}" type="button">${t("delete")}</button>`
-          : `<button class="btn danger" data-job-del="${escapeHtml(j.id)}" type="button">${t("delete")}</button>`;
+      let actions = `<button class="btn danger" data-job-del="${escapeHtml(j.id)}" type="button">${t("delete")}</button>`;
+      if (j.status === "running") {
+        actions = `<button class="btn secondary" data-job-cancel="${escapeHtml(j.id)}" type="button">${t("cancel")}</button>
+             ${actions}`;
+      } else if (j.status === "error" || j.status === "paused") {
+        actions = `<button class="btn" data-job-resume="${escapeHtml(j.id)}" type="button">${t("resume_btn")}</button>
+             ${actions}`;
+      }
       return `<article class="card">
         <div class="card-row"><h3>${escapeHtml(j.name)}</h3><span class="pill">${escapeHtml(j.status)}</span></div>
         <p class="meta">${escapeHtml(j.error || j.url)}</p>
@@ -878,6 +883,12 @@ function renderJobs() {
   root.querySelectorAll("[data-job-cancel]").forEach((btn) => {
     btn.onclick = async () => {
       await api(`/api/downloads/${btn.dataset.jobCancel}/cancel`, { method: "POST", body: "{}" });
+      pollJobs();
+    };
+  });
+  root.querySelectorAll("[data-job-resume]").forEach((btn) => {
+    btn.onclick = async () => {
+      await api(`/api/downloads/${btn.dataset.jobResume}/resume`, { method: "POST", body: "{}" });
       pollJobs();
     };
   });
@@ -1277,6 +1288,13 @@ state.lang = settings.language || "ru";
 state.geocoders = settings.geocoders || [];
 $("lang-select").value = state.lang;
 $("rate-limit").value = settings.rate_limit_bps || 0;
+{
+  const el = $("build-info");
+  const ver = settings.version || "dev";
+  const rev = settings.commit || "unknown";
+  el.textContent = `mantica ${ver} · ${rev}`;
+  el.hidden = false;
+}
 applyTheme();
 applyI18n();
 renderGeocoders();

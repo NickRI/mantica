@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"archive/tar"
@@ -193,13 +193,15 @@ func sanitizeName(name string) string {
 }
 
 func (a *App) jobsPath() string {
-	return filepath.Join(a.dir, ".downloads.json")
+	return filepath.Join(a.dir, "downloads.json")
 }
 
 func (a *App) loadJobs() {
-	data, err := os.ReadFile(a.jobsPath())
+	path := a.jobsPath()
+	data, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
+			slog.Info("downloads file missing", "path", path)
 			return
 		}
 		panic(err)
@@ -212,6 +214,17 @@ func (a *App) loadJobs() {
 	defer a.mu.Unlock()
 	for _, job := range jobs {
 		a.jobs[job.ID] = job
+	}
+	slog.Info("downloads loaded", "path", path, "count", len(jobs))
+	for _, job := range jobs {
+		slog.Info("download job",
+			"id", job.ID,
+			"name", job.Name,
+			"status", job.Status,
+			"written", job.Written,
+			"total", job.Total,
+			"error", job.Error,
+		)
 	}
 }
 
@@ -237,18 +250,22 @@ func (a *App) saveJobs() {
 func (a *App) resumeJobs() {
 	a.mu.Lock()
 	var resume []*Download
+	var skip []*Download
 	for _, job := range a.jobs {
 		switch job.Status {
 		case "running", "paused", "error":
 			resume = append(resume, job)
+		default:
+			skip = append(skip, job)
 		}
 	}
 	a.mu.Unlock()
-	if len(resume) > 0 {
-		slog.Info("resuming downloads", "count", len(resume))
+	slog.Info("download resume scan", "resume", len(resume), "skip", len(skip))
+	for _, job := range skip {
+		slog.Info("download skip resume", "id", job.ID, "name", job.Name, "status", job.Status)
 	}
 	for _, job := range resume {
-		slog.Info("download resume", "id", job.ID, "name", job.Name, "status", job.Status, "written", job.Written, "total", job.Total)
+		slog.Info("download resume", "id", job.ID, "name", job.Name, "status", job.Status, "written", job.Written, "total", job.Total, "error", job.Error)
 		go a.runDownload(job)
 	}
 }
@@ -280,7 +297,7 @@ func (a *App) pauseAllDownloads() {
 func (a *App) startDownload(rawURL, name, checksum string, replace bool) (*Download, error) {
 	remote := remoteFilename(rawURL, name)
 	destName := finalTilesetName(remote)
-	dest := filepath.Join(a.dir, destName)
+	dest := filepath.Join(a.tilesDir, destName)
 
 	if job := a.claimDownload(destName, replace); job != nil {
 		return job, nil
@@ -370,7 +387,7 @@ func (a *App) removeTilesetNamed(name string) error {
 	if strings.HasSuffix(strings.ToLower(name), ".pmtiles") {
 		kind = "pmtiles"
 	}
-	id, err := handlers.RelativePathID(filepath.Join(a.dir, name), a.dir)
+	id, err := handlers.RelativePathID(filepath.Join(a.tilesDir, name), a.tilesDir)
 	if err != nil {
 		return err
 	}
@@ -378,6 +395,30 @@ func (a *App) removeTilesetNamed(name string) error {
 }
 
 var errAlreadyDownloaded = errors.New("already downloaded")
+var errJobNotFound = errors.New("download not found")
+var errResumeNotAllowed = errors.New("download cannot be resumed")
+
+func (a *App) resumeDownload(id string) (*Download, error) {
+	a.mu.Lock()
+	job := a.jobs[id]
+	if job == nil {
+		a.mu.Unlock()
+		return nil, errJobNotFound
+	}
+	if _, running := a.cancels[job.ID]; running {
+		a.mu.Unlock()
+		return job, nil
+	}
+	switch job.Status {
+	case "error", "paused":
+		a.mu.Unlock()
+		go a.runDownload(job)
+		return job, nil
+	default:
+		a.mu.Unlock()
+		return nil, errResumeNotAllowed
+	}
+}
 
 func (a *App) rateLimiter() *rate.Limiter {
 	a.mu.Lock()
@@ -423,7 +464,7 @@ func (a *App) hydraOptions(onProgress hydra.ProgressFunc) hydra.Options {
 }
 
 func (a *App) hydraWorkDir(job *Download) string {
-	return filepath.Join(a.dir, ".downloads", job.ID)
+	return filepath.Join(a.dir, "downloads", job.ID)
 }
 
 func (a *App) clearHydraWorkDir(job *Download) {
@@ -551,7 +592,7 @@ func (a *App) runDownload(job *Download) {
 
 	job.Total = res.Size
 	job.Written = res.Size
-	dest := filepath.Join(a.dir, job.Name)
+	dest := filepath.Join(a.tilesDir, job.Name)
 	downloaded := res.Path
 	slog.Info("download finished", "id", job.ID, "name", job.Name, "path", downloaded, "dest", dest, "size", res.Size)
 	if archiveExt(job.RemoteName) != "" || archiveExt(job.URL) != "" {
