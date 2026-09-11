@@ -3,11 +3,11 @@
 pkgs.buildGoModule rec {
   pname = "mantica";
   # Bump by hand for releases.
-  version = "0.1.6";
+  version = "0.1.7";
 
   src = ./.;
 
-  vendorHash = "sha256-7YMB0HXqAPuyzwuEKQlQ1RcSkpzAtiTn2GZaWpGnx98=";
+  vendorHash = "sha256-DL8Thx9O3AwutPFGSQzYaMs5tWIEOA3LSSI7bTYgbjE=";
 
   ldflags = [
     "-s"

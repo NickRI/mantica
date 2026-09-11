@@ -1,7 +1,7 @@
 <div align="center">
 
   <p>
-    <img src="internal/app/logo.svg" width="220" alt="Mantica">
+    <img src="logo.svg" width="220" alt="Mantica">
   </p>
 
   <h1>Mantica</h1>
