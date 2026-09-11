@@ -21,7 +21,17 @@ jobs:
           go test ./...
         env:
           CGO_ENABLED: "1"
+
+      - name: Build with version ldflags
+        run: |
+          make build
+          ./dist/mantica -version
+        env:
+          CGO_ENABLED: "1"
+
       - uses: DeterminateSystems/nix-installer-action@main
 
       - name: Nix build
-        run: nix build .#default --print-build-logs
+        run: |
+          nix build .#default --print-build-logs
+          ./result/bin/mantica -version

@@ -27,7 +27,9 @@ jobs:
           go-version-file: go.mod
 
       - name: Build release artifacts
-        run: make release-artifacts
+        run: |
+          make release-artifacts VERSION="${GITHUB_REF_NAME}" COMMIT="$(git rev-parse --short=12 HEAD)"
+          ./dist/mantica -version
 
       - name: Upload artifacts to release
         uses: softprops/action-gh-release@v2

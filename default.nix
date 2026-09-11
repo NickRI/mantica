@@ -1,12 +1,19 @@
-{ pkgs, ... }:
+{ pkgs }:
 
-pkgs.buildGoModule {
+pkgs.buildGoModule rec {
   pname = "mantica";
-  version = "0.1.1";
+  # Bump by hand for releases.
+  version = "0.1.5";
 
   src = ./.;
 
   vendorHash = "sha256-7YMB0HXqAPuyzwuEKQlQ1RcSkpzAtiTn2GZaWpGnx98=";
+
+  ldflags = [
+    "-s"
+    "-w"
+    "-X main.version=${version}"
+  ];
 
   doCheck = false;
 

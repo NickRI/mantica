@@ -11,24 +11,40 @@
         "aarch64-linux"
       ];
       forAllSystems = nixpkgs.lib.genAttrs systems;
+
+      commit = self.shortRev or self.dirtyShortRev or "unknown";
+
+      mkMantica =
+        pkgs:
+        (pkgs.callPackage ./default.nix { }).overrideAttrs (old: {
+          ldflags = (old.ldflags or [ ]) ++ [
+            "-X main.commit=${commit}"
+          ];
+        });
     in
     {
       packages = forAllSystems (
         system:
         let
           pkgs = nixpkgs.legacyPackages.${system};
+          mantica = mkMantica pkgs;
         in
         {
-          default = pkgs.callPackage ./default.nix { };
-          mantica = self.packages.${system}.default;
+          default = mantica;
+          inherit mantica;
         }
       );
 
-      nixosModules.default = import ./module.nix;
+      nixosModules.default =
+        { pkgs, ... }:
+        {
+          imports = [ ./module.nix ];
+          services.mantica.package = nixpkgs.lib.mkDefault self.packages.${pkgs.system}.mantica;
+        };
       nixosModules.mantica = self.nixosModules.default;
 
       overlays.default = final: prev: {
-        mantica = final.callPackage ./default.nix { };
+        mantica = mkMantica final;
       };
     };
 }
